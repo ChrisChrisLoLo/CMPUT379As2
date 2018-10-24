@@ -200,6 +200,10 @@ void progController(int nSwitch){
                         case OPEN:
                             handleOpen(tokens,fd,switchArr);
                             break;
+
+                        case QUERY:
+                            handleQuery(tokens,fd,switchArr);
+                            break;
                     }
                 }
 
@@ -310,7 +314,7 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
             +to_string(swj)+" "+to_string(swk)+" "
             +to_string(ipLow)+" "+to_string(ipHigh) ;
     fdPrint(fd[CONT_FD][1],outBuf,openPacket);
-    
+
     string trafLine;
     while(1){
         //read line from traffic file
@@ -336,11 +340,13 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
                             }
                         }
                     }
-
                     //if no rule
                     if(!resolved){
                         //ask controller for help.
                         cout<<"Ask controller for help"<<endl;
+                        char buf[MAX_BUFF];
+                        string queryPacket = to_string(QUERY)+" "+to_string(swi)+" "+to_string(initTrafIp)+" "+to_string(dstTrafIp);
+                        fdPrint(fd[CONT_FD][1],buf,queryPacket);
                     }
                     else{
                         switch(foundRule.actionType){

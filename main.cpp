@@ -33,6 +33,7 @@
 #define CONT_FD 0
 #define SWJ_FD 1
 #define SWK_FD 2
+#define TRAF_FD 3
 
 #define MIN_PRI 4
 #define MAX_RULES 100
@@ -86,6 +87,31 @@ void fdPrint(int fd,char* buf,string message){
     sprintf(buf,cString);
     write(fd,buf, MAX_BUFF);
 }
+
+void handleOpen(vector<string> tokens,int fd[][2]){
+    int swi = stoi(tokens[1]);
+    int swj = stoi(tokens[2]);
+    int swk = stoi(tokens[3]);
+    int swiIpLow = stoi(tokens[4]);
+    int swiIpHight = stoi(tokens[5]);
+
+    string fifoDirWrite = "./fifo-0-"+to_string(swi);
+    mkfifo(fifoDirWrite.c_str(),(mode_t) 0777);
+    int fileDescWrite = open(fifoDirWrite.c_str(),O_WRONLY|O_NONBLOCK);
+    if (fileDescWrite<0){
+        perror("Error in opening switch writeFIFO");
+        exit(EXIT_FAILURE);
+    }
+    else {
+        fd[swi-1][1] = fileDescWrite;
+    }
+    string ackPacket = to_string(ACK);
+
+    char outBuf[MAX_BUFF];
+    fdPrint(fd[swi-1][1],outBuf,ackPacket);
+
+}
+
 
 //Many concepts used from poll.c file created by E. Elmallah found in the examples in eclass.
 void progController(int nSwitch){
@@ -156,6 +182,10 @@ void progController(int nSwitch){
 //                    }
                     string output = (string) buf;
                     cout<<output<<endl;
+                    vector<string>tokens = tokenize(output);
+                    switch(stoi(tokens[0])){
+                        case OPEN: handleOpen(tokens,fd);
+                    }
                 }
 
             }
@@ -166,7 +196,7 @@ void progController(int nSwitch){
 
 void progSwitch(string trafficFile,int swi, int swj,int swk,int ipLow,int ipHigh){
     int timeout = 0;
-    int fd[3][2];
+    int fd[4][2];
     struct pollfd pollfd[3];
     cout<<trafficFile<<endl<<swi<<endl<<swj<<endl<<swk<<endl<<ipLow<<ipHigh<<endl;
     string fifoDirWrite = "./fifo-"+to_string(swi)+"-0";
@@ -289,6 +319,15 @@ void progSwitch(string trafficFile,int swi, int swj,int swk,int ipLow,int ipHigh
 //                    }
                     string output = (string) inBuf;
                     cout<<output<<endl;
+                    vector<string>tokens = tokenize(output);
+                    switch(stoi(tokens[0])){
+                        case ACK: cout<<"Got ACK"<<endl;
+
+                        case RELAY: cout<<"Got RELAY"<<endl;
+
+                        case ADD: cout<<"Got ADD"<<endl;
+                    }
+
                 }
             }
         }

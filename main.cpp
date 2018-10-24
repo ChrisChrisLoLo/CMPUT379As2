@@ -11,6 +11,8 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <poll.h>
+#include <sstream>
+#include <iterator>
 //TODO:SET LIMIT TO 10 MIN
 #define RLIM_CUR 100 * 60
 #define RLIM_MAX 100 * 60
@@ -35,6 +37,8 @@
 #define MIN_PRI 4
 #define MAX_RULES 100
 
+#define MAX_BUFF 80
+
 struct flow_rule{
     int srcIpLo;
     int srcIpHi;
@@ -56,10 +60,31 @@ bool is_number(const std::string& s)
             s.end(), [](char c) { return !std::isdigit(c); }) == s.end();
 }
 
+//tokenize string into a vector of strings
+//https://www.fluentcpp.com/2017/04/21/how-to-split-a-string-in-c/
+vector<string> tokenize(string input){
+    istringstream iss(input);
+    vector<string> results(istream_iterator<string>{iss}, istream_iterator<string>());
+    return results;
+}
+//
+//string detokenize(vector<string> input){
+//    string s;
+//    return copy(input.begin(), input.end(), ostream_iterator<string>(&s, " "));
+//}
+
 
 void pExit(string e){
     cout<<e<<endl;
     exit(1);
+}
+
+void fdPrint(int fd,char* buf,string message){
+    memset(buf, 0, sizeof(buf));
+    // Need to close? close(fd[CONT_FD][0]);
+    const char * cString = message.c_str();
+    sprintf(buf,cString);
+    write(fd,buf, MAX_BUFF);
 }
 
 //Many concepts used from poll.c file created by E. Elmallah found in the examples in eclass.
@@ -108,8 +133,7 @@ void progController(int nSwitch){
 
     }
     //Controller loop
-    int bufsize = 80;
-    char buf[bufsize];
+    char buf[MAX_BUFF];
     int inLen;
     while(1){
         int rval=poll(pollfd,nSwitch,timeout);
@@ -122,14 +146,14 @@ void progController(int nSwitch){
             //cout<<rval<<endl;
             for(int i=0;i<nSwitch;i++){
                 if(pollfd[i].revents & POLLIN){
-                    memset(buf, 0, bufsize);
-                    inLen = read(fd[i][0],buf,bufsize);
-                    for(int j=0;j<inLen;j++){
-                        if (buf[j] == 0){
-                            break;
-                        }
-                        cout<<buf[j];
-                    }
+                    memset(buf, 0, MAX_BUFF);
+                    inLen = read(fd[i][0],buf,MAX_BUFF);
+//                    for(int j=0;j<inLen;j++){
+//                        if (buf[j] == 0){
+//                            break;
+//                        }
+//                        cout<<buf[j];
+//                    }
                     string output = (string) buf;
                     cout<<output<<endl;
                 }
@@ -178,7 +202,7 @@ void progSwitch(string trafficFile,int swi, int swj,int swk,int ipLow,int ipHigh
         //Close??
     }
 
-
+    //if defined, open readFIFOs of switch j and switch k
 
     if(swj != -1){
         string fifoSwjWrite = "./fifo-"+to_string(swi)+"-"+to_string(swj);
@@ -232,16 +256,19 @@ void progSwitch(string trafficFile,int swi, int swj,int swk,int ipLow,int ipHigh
 
     flowTable[0] = initRule;
 
-    int bufsize = 80;
-    char buf[bufsize];
+    char outBuf[MAX_BUFF];
+    char inBuf[MAX_BUFF];
     int inLen;
-    while(1){
-        memset(buf, 0, bufsize);
-        // Need to close? close(fd[CONT_FD][0]);
-        sprintf(buf,"HIII\n");
-        write(fd[CONT_FD][1],buf,bufsize);
-        memset(buf, 0, bufsize);
 
+    //Send OPEN Packet
+    string openPacket = to_string(OPEN)+" "+to_string(swi)+" "
+            +to_string(swj)+" "+to_string(swk)+" "
+            +to_string(ipLow)+" "+to_string(ipHigh) ;
+    //string openPacket = "12345678910111213 14 15 16 17 18 19 10";
+    fdPrint(fd[CONT_FD][1],outBuf,openPacket);
+
+
+    while(1){
         int rval=poll(pollfd,3,timeout);
         if (rval < 0){
             perror("Error in polling in controller");
@@ -252,15 +279,15 @@ void progSwitch(string trafficFile,int swi, int swj,int swk,int ipLow,int ipHigh
             //cout<<rval<<endl;
             for(int i=0;i<3;i++){
                 if(pollfd[i].revents & POLLIN){
-                    memset(buf, 0, bufsize);
-                    inLen = read(fd[i][0],buf,bufsize);
-                    for(int j=0;j<inLen;j++){
-                        if (buf[j] == 0){
-                            break;
-                        }
-                        cout<<buf[j];
-                    }
-                    string output = (string) buf;
+                    memset(inBuf, 0, MAX_BUFF);
+                    inLen = read(fd[i][0],inBuf,MAX_BUFF);
+//                    for(int j=0;j<inLen;j++){
+//                        if (inBuf[j] == 0){
+//                            break;
+//                        }
+//                        cout<<inBuf[j];
+//                    }
+                    string output = (string) inBuf;
                     cout<<output<<endl;
                 }
             }

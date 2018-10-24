@@ -11,9 +11,9 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <poll.h>
-
-#define RLIM_CUR 10 * 60
-#define RLIM_MAX 10 * 60
+//TODO:SET LIMIT TO 10 MIN
+#define RLIM_CUR 100 * 60
+#define RLIM_MAX 100 * 60
 
 #define MAX_NSW 7
 #define MIN_IP 0
@@ -25,11 +25,26 @@
 #define ADD 5
 #define RELAY 6
 
+#define DROP 0
+#define FORWARD 1
+
 #define CONT_FD 0
 #define SWJ_FD 1
 #define SWK_FD 2
 
+#define MIN_PRI 4
+#define MAX_RULES 100
 
+struct flow_rule{
+    int srcIpLo;
+    int srcIpHi;
+    int destIpLo;
+    int destIpHi;
+    int actionType;
+    int actionVal;
+    int pri;
+    int pktCount;
+};
 
 using namespace std;
 
@@ -152,7 +167,7 @@ void progSwitch(string trafficFile,int swi, int swj,int swk,int ipLow,int ipHigh
     cout<<"opening " + fifoDirWrite<<endl;
     int fileDescWrite = open(fifoDirWrite.c_str(),O_WRONLY|O_NONBLOCK);
 
-    //int fileDescWrite = open("./fifo-1-0",O_WRONLY|O_NONBLOCK);
+//    int fileDescWrite = open("./fifo-1-0",O_WRONLY|O_NONBLOCK);
 
     if (fileDescWrite<0){
         perror("Error in opening controller writeFIFO");
@@ -165,13 +180,13 @@ void progSwitch(string trafficFile,int swi, int swj,int swk,int ipLow,int ipHigh
 
 
 
-    if(swj){
+    if(swj != -1){
         string fifoSwjWrite = "./fifo-"+to_string(swi)+"-"+to_string(swj);
         string fifoSwjRead = "./fifo-"+to_string(swj)+"-"+to_string(swi);
-        if (mkfifo(fifoDirWrite.c_str(),(mode_t) 0777) < 0)perror(strerror(errno));
-        int fileSwjRead = open(fifoSwjRead.c_str(),O_WRONLY|O_NONBLOCK);
+        if (mkfifo(fifoSwjRead.c_str(),(mode_t) 0777) < 0)perror(strerror(errno));
+        int fileSwjRead = open(fifoSwjRead.c_str(),O_RDONLY|O_NONBLOCK);
         if (fileSwjRead<0){
-            perror("Error in opening readFIFO");
+            perror("Error in opening swj readFIFO");
             exit(EXIT_FAILURE);
         }
         else{
@@ -181,13 +196,17 @@ void progSwitch(string trafficFile,int swi, int swj,int swk,int ipLow,int ipHigh
             pollfd[SWJ_FD].revents = 0;
         }
     }
-    if(swk){
+    if(swk != -1){
         string fifoSwkWrite = "./fifo-"+to_string(swi)+"-"+to_string(swk);
         string fifoSwkRead = "./fifo-"+to_string(swk)+"-"+to_string(swi);
-        if (mkfifo(fifoDirWrite.c_str(),(mode_t) 0777) < 0)perror(strerror(errno));
-        int fileSwkRead = open(fifoSwkRead.c_str(),O_WRONLY|O_NONBLOCK);
+//        if (mkfifo(fifoSwkRead.c_str(),(mode_t) 0777) < 0)perror(strerror(errno));
+        if (mkfifo(fifoSwkRead.c_str(),(mode_t) 0777) < 0) {
+            cout << "fifo already made" << endl;
+        }
+        cout<<"opening"<<fifoSwkRead<<endl;
+        int fileSwkRead = open(fifoSwkRead.c_str(),O_RDONLY|O_NONBLOCK);
         if (fileSwkRead<0){
-            perror("Error in opening readFIFO");
+            perror("Error in opening swk readFIFO");
             exit(EXIT_FAILURE);
         }
         else{
@@ -198,6 +217,20 @@ void progSwitch(string trafficFile,int swi, int swj,int swk,int ipLow,int ipHigh
         }
     }
 
+    //Initialize flow table and add initial rule
+    flow_rule flowTable[MAX_RULES];
+
+    flow_rule initRule;
+    initRule.srcIpLo=0;
+    initRule.srcIpHi=MAX_IP;
+    initRule.destIpLo=ipLow;
+    initRule.destIpHi=ipHigh;
+    initRule.actionType=FORWARD;
+    initRule.actionVal = 3;
+    initRule.pri = MIN_PRI;
+    initRule.pktCount = 0;
+
+    flowTable[0] = initRule;
 
     int bufsize = 80;
     char buf[bufsize];
@@ -233,7 +266,7 @@ void progSwitch(string trafficFile,int swi, int swj,int swk,int ipLow,int ipHigh
 ifstream trafficFile;
 
 int main(int argc, char* argv[]){
-    struct rlimit rlim;
+    rlimit rlim;
     if (getrlimit(RLIMIT_CPU, &rlim) == -1){
         cout<<"Error:Rlimit get failed"<<endl;
         cout<<strerror(errno)<<endl;
@@ -289,7 +322,8 @@ int main(int argc, char* argv[]){
 //            swj = atoi(swjIn[2]);
 //        }
 
-        if (swjIn=="null"){
+        //if (swjIn==(char*)"null"){
+        if (swjIn==string("null")){
             swj = -1;
         }
         else{
@@ -297,7 +331,7 @@ int main(int argc, char* argv[]){
 //            pExit("Error: swj is invalid");
         }
 
-        if (swkIn=="null"){
+        if (swkIn==string("null")){
             swk = -1;
         }
         else{

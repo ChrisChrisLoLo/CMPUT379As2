@@ -27,8 +27,8 @@
 #define ADD 5
 #define RELAY 6
 
-#define DROP 0
-#define FORWARD 1
+#define DROP 2
+#define FORWARD 3
 
 #define CONT_FD 0
 #define SWJ_FD 1
@@ -287,7 +287,7 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
     }
 
     //Initialize flow table and add initial rule
-    flow_rule flowTable[MAX_RULES];
+    flow_rule flowTable[MAX_RULES] = {{0}};
 
     flow_rule initRule;
     initRule.srcIpLo=0;
@@ -310,18 +310,49 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
             +to_string(swj)+" "+to_string(swk)+" "
             +to_string(ipLow)+" "+to_string(ipHigh) ;
     fdPrint(fd[CONT_FD][1],outBuf,openPacket);
-
-    //Open traffic file
-
+    
     string trafLine;
     while(1){
-        //read line from file
+        //read line from traffic file
         if (trafficFile.is_open()) {
             if(getline(trafficFile,trafLine)){
                 vector<string> trafTokens = tokenize(trafLine);
                 if (trafTokens[0] == (string)"sw"+to_string(swi)){
                     cout<<"FOUND A RULE FOR ME"<<endl;
+
+                    int initTrafIp = stoi(trafTokens[1]);
+                    int dstTrafIp = stoi(trafTokens[2]);
+                    bool resolved = false;
+                    flow_rule foundRule = {0};
+
+                    //find rule that matches packet
+                    for(int i=0;i<MAX_RULES;i++){
+                        //if traffic ip matches on in the rule set
+                        if(initTrafIp <= flowTable[i].srcIpHi && initTrafIp >= flowTable->srcIpLo){
+                            if(dstTrafIp <= flowTable[i].destIpHi && dstTrafIp >= flowTable[i].destIpLo){
+                                flowTable[i].pktCount += 1;
+                                foundRule = flowTable[i];
+                                resolved = true;
+                            }
+                        }
+                    }
+
+                    //if no rule
+                    if(!resolved){
+                        //ask controller for help.
+                        cout<<"Ask controller for help"<<endl;
+                    }
+                    else{
+                        switch(foundRule.actionType){
+                            case FORWARD:
+                                //Deliver the package
+                                cout<<"DELIVERED"<<endl;
+                                break;
+                        }
+                    }
                 }
+
+
             }
         }
         //poll keyboard

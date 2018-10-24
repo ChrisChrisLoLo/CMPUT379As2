@@ -73,6 +73,7 @@ vector<string> tokenize(string input){
 //    string s;
 //    return copy(input.begin(), input.end(), ostream_iterator<string>(&s, " "));
 //}
+ifstream trafficFile;
 
 
 void pExit(string e){
@@ -87,15 +88,26 @@ void fdPrint(int fd,char* buf,string message){
     sprintf(buf,cString);
     write(fd,buf, MAX_BUFF);
 }
+struct switch_t{
+    int swi;
+    int swj;
+    int swk;
+    int ipLow;
+    int ipHigh;
+};
 
-void handleOpen(vector<string> tokens,int fd[][2]){
-    int swi = stoi(tokens[1]);
-    int swj = stoi(tokens[2]);
-    int swk = stoi(tokens[3]);
-    int swiIpLow = stoi(tokens[4]);
-    int swiIpHight = stoi(tokens[5]);
+void handleOpen(vector<string> tokens,int fd[][2],vector<switch_t> swArr){
+    switch_t switchIn;
+    switchIn.swi = stoi(tokens[1]);
+    switchIn.swj = stoi(tokens[2]);
+    switchIn.swk = stoi(tokens[3]);
+    switchIn.ipLow = stoi(tokens[4]);
+    switchIn.ipHigh = stoi(tokens[5]);
 
-    string fifoDirWrite = "./fifo-0-"+to_string(swi);
+    //add switch to array.
+    swArr.push_back(switchIn);
+
+    string fifoDirWrite = "./fifo-0-"+to_string(switchIn.swi);
     mkfifo(fifoDirWrite.c_str(),(mode_t) 0777);
     int fileDescWrite = open(fifoDirWrite.c_str(),O_WRONLY|O_NONBLOCK);
     if (fileDescWrite<0){
@@ -103,12 +115,12 @@ void handleOpen(vector<string> tokens,int fd[][2]){
         exit(EXIT_FAILURE);
     }
     else {
-        fd[swi-1][1] = fileDescWrite;
+        fd[switchIn.swi-1][1] = fileDescWrite;
     }
     string ackPacket = to_string(ACK);
 
     char outBuf[MAX_BUFF];
-    fdPrint(fd[swi-1][1],outBuf,ackPacket);
+    fdPrint(fd[switchIn.swi-1][1],outBuf,ackPacket);
 
 }
 
@@ -161,6 +173,7 @@ void progController(int nSwitch){
     //Controller loop
     char buf[MAX_BUFF];
     int inLen;
+    vector<switch_t> switchArr;
     while(1){
         int rval=poll(pollfd,nSwitch,timeout);
         if (rval < 0){
@@ -184,7 +197,9 @@ void progController(int nSwitch){
                     cout<<output<<endl;
                     vector<string>tokens = tokenize(output);
                     switch(stoi(tokens[0])){
-                        case OPEN: handleOpen(tokens,fd);
+                        case OPEN:
+                            handleOpen(tokens,fd,switchArr);
+                            break;
                     }
                 }
 
@@ -194,11 +209,11 @@ void progController(int nSwitch){
 
 };
 
-void progSwitch(string trafficFile,int swi, int swj,int swk,int ipLow,int ipHigh){
+void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
     int timeout = 0;
     int fd[4][2];
     struct pollfd pollfd[3];
-    cout<<trafficFile<<endl<<swi<<endl<<swj<<endl<<swk<<endl<<ipLow<<ipHigh<<endl;
+    cout<<endl<<swi<<endl<<swj<<endl<<swk<<endl<<ipLow<<ipHigh<<endl;
     string fifoDirWrite = "./fifo-"+to_string(swi)+"-0";
     string fifoDirRead = "./fifo-0-"+to_string(swi);
 
@@ -294,11 +309,25 @@ void progSwitch(string trafficFile,int swi, int swj,int swk,int ipLow,int ipHigh
     string openPacket = to_string(OPEN)+" "+to_string(swi)+" "
             +to_string(swj)+" "+to_string(swk)+" "
             +to_string(ipLow)+" "+to_string(ipHigh) ;
-    //string openPacket = "12345678910111213 14 15 16 17 18 19 10";
     fdPrint(fd[CONT_FD][1],outBuf,openPacket);
 
+    //Open traffic file
 
+    string trafLine;
     while(1){
+        //read line from file
+        if (trafficFile.is_open()) {
+            if(getline(trafficFile,trafLine)){
+                vector<string> trafTokens = tokenize(trafLine);
+                if (trafTokens[0] == (string)"sw"+to_string(swi)){
+                    cout<<"FOUND A RULE FOR ME"<<endl;
+                }
+            }
+        }
+        //poll keyboard
+
+        //poll switch
+
         int rval=poll(pollfd,3,timeout);
         if (rval < 0){
             perror("Error in polling in controller");
@@ -321,11 +350,17 @@ void progSwitch(string trafficFile,int swi, int swj,int swk,int ipLow,int ipHigh
                     cout<<output<<endl;
                     vector<string>tokens = tokenize(output);
                     switch(stoi(tokens[0])){
-                        case ACK: cout<<"Got ACK"<<endl;
+                        case ACK:
+                            cout<<"Got ACK"<<endl;
+                            break;
 
-                        case RELAY: cout<<"Got RELAY"<<endl;
+                        case RELAY:
+                            cout<<"Got RELAY"<<endl;
+                            break;
 
-                        case ADD: cout<<"Got ADD"<<endl;
+                        case ADD:
+                            cout<<"Got ADD"<<endl;
+                            break;
                     }
 
                 }
@@ -334,7 +369,6 @@ void progSwitch(string trafficFile,int swi, int swj,int swk,int ipLow,int ipHigh
     }
 }
 
-ifstream trafficFile;
 
 int main(int argc, char* argv[]){
     rlimit rlim;
@@ -383,7 +417,7 @@ int main(int argc, char* argv[]){
         trafficFile.open(trafficFileName);
         cout<<trafficFileName<<endl;
         if(!trafficFile.is_open()){
-            pExit("Error: file cannot open");
+            pExit("Error: Traffic file cannot open");
         }
         char * swjIn = argv[3];
         char * swkIn = argv[4];
@@ -427,7 +461,7 @@ int main(int argc, char* argv[]){
 
         cout<<ipLow<<"-"<<ipHigh<<endl;
 
-        progSwitch(trafficFileName,swi,swj,swk,ipLow,ipHigh);
+        progSwitch(swi,swj,swk,ipLow,ipHigh);
     }
     else {
         cout<<argv[1];

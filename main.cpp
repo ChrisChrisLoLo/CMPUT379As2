@@ -236,6 +236,12 @@ void progSwitch(string trafficFile,int swi, int swj,int swk,int ipLow,int ipHigh
     char buf[bufsize];
     int inLen;
     while(1){
+        memset(buf, 0, bufsize);
+        // Need to close? close(fd[CONT_FD][0]);
+        sprintf(buf,"HIII\n");
+        write(fd[CONT_FD][1],buf,bufsize);
+        memset(buf, 0, bufsize);
+
         int rval=poll(pollfd,3,timeout);
         if (rval < 0){
             perror("Error in polling in controller");
@@ -257,7 +263,6 @@ void progSwitch(string trafficFile,int swi, int swj,int swk,int ipLow,int ipHigh
                     string output = (string) buf;
                     cout<<output<<endl;
                 }
-
             }
         }
     }

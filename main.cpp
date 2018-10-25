@@ -40,6 +40,9 @@
 
 #define MAX_BUFF 80
 
+#define SEND_LEFT 1
+#define SEND_RIGHT 2
+
 struct flow_rule{
     int srcIpLo;
     int srcIpHi;
@@ -96,6 +99,96 @@ struct switch_t{
     int ipHigh;
 };
 
+
+void sendRules(int fd[][2],vector<switch_t> swArr, int sourceSw, int dstIp){
+    bool switchFound=false;
+    for(int i=0;i<swArr.size();i++){
+        if(dstIp>=swArr[i].ipLow && dstIp<=swArr[i].ipHigh){
+            //ip destination matches current switch
+            //fd[swArr[i].swi-1][1];
+            char buf[MAX_BUFF];
+            if (sourceSw < swArr[i].swi) {
+                //send rule to current switch
+
+                //srcIP_lo, srcIP_hi, destIP_low, destIP_high, forward, actionVal , pri, pketcount
+                string forwardRightPacket = (string)"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
+                        +to_string(FORWARD)+" "+to_string(SEND_RIGHT)+to_string(MIN_PRI)+" "+"0";
+
+                //send to all switches in range [sourceSwitch,destinationSwitch);
+
+                for(int j = sourceSw;j<swArr[i].swi;j++){
+                    fdPrint(fd[j-1][1],buf,forwardRightPacket);
+                }
+                switchFound = true;
+            }
+            else if (sourceSw > swArr[i].swi){
+                string forwardLeftPacket = (string)"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
+                        +to_string(FORWARD)+" "+to_string(SEND_LEFT)+to_string(MIN_PRI)+" "+"0";
+
+                //send to all switches in range [sourceSwitch,destinationSwitch);
+
+                for(int j = sourceSw; j>swArr[i].swi;j--){
+                    fdPrint(fd[swArr[i].swi-1][1],buf,forwardLeftPacket);
+                }
+                switchFound = true;
+            }
+        }
+        if(!switchFound){
+            //no switch found, tell switch to drop package
+            string dropPacket = "0 1000"+to_string(dstIp)+" "+to_string(dstIp)+" "
+                    +to_string(DROP)+" "+to_string(MIN_PRI)+" "+"0";
+        }
+    }
+}
+
+void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
+    int sourceSw = stoi(tokens[1]);
+    int srcIp = stoi(tokens[2]);
+    int dstIp = stoi(tokens[3]);
+    char buf[MAX_BUFF];
+
+    //see if there is a compatible switch that can meet the rules
+    bool switchFound=false;
+    for(int i=0;i<swArr.size();i++){
+        if(dstIp>=swArr[i].ipLow && dstIp<=swArr[i].ipHigh){
+            //ip destination matches current switch
+            //fd[swArr[i].swi-1][1];
+            if (sourceSw < swArr[i].swi) {
+                //send rule to current switch
+
+                //srcIP_lo, srcIP_hi, destIP_low, destIP_high, forward, actionVal , pri, pketcount
+                string forwardRightPacket = (string) to_string(ADD)+" "+"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
+                                            +to_string(FORWARD)+" "+to_string(SEND_RIGHT)+to_string(MIN_PRI)+" "+"0";
+
+                //send to all switches in range [sourceSwitch,destinationSwitch);
+
+                for(int j = sourceSw;j<swArr[i].swi;j++){
+                    fdPrint(fd[j-1][1],buf,forwardRightPacket);
+                }
+                switchFound = true;
+            }
+            else if (sourceSw > swArr[i].swi){
+                string forwardLeftPacket = (string) to_string(ADD)+" "+"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
+                                           +to_string(FORWARD)+" "+to_string(SEND_LEFT)+to_string(MIN_PRI)+" "+"0";
+
+                //send to all switches in range [sourceSwitch,destinationSwitch);
+
+                for(int j = sourceSw; j>swArr[i].swi;j--){
+                    fdPrint(fd[j-1][1],buf,forwardLeftPacket);
+                }
+                switchFound = true;
+            }
+        }
+    }
+    if(!switchFound){
+        //no switch found, tell switch to drop package
+        string dropPacket =  to_string(ADD)+" "+"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
+                            +to_string(DROP)+" "+to_string(MIN_PRI)+" "+"0";
+        fdPrint(fd[sourceSw-1][1],buf,dropPacket);
+        cout<<"PRINTED"<<endl;
+    }
+}
+
 void handleOpen(vector<string> tokens,int fd[][2],vector<switch_t> swArr){
     switch_t switchIn;
     switchIn.swi = stoi(tokens[1]);
@@ -126,7 +219,7 @@ void handleOpen(vector<string> tokens,int fd[][2],vector<switch_t> swArr){
 
 
 //Many concepts used from poll.c file created by E. Elmallah found in the examples in eclass.
-void progController(int nSwitch){
+void progController(int nSwitch) {
     int timeout = 0;
     int fd[nSwitch][2];
     struct pollfd pollfd[nSwitch];
@@ -135,84 +228,70 @@ void progController(int nSwitch){
 
 
 
-    for(int i=1;i<nSwitch+1;i++){
-        string fifoDirWrite = "./fifo-0-"+to_string(i);
-        string fifoDirRead = "./fifo-"+to_string(i)+"-0";
+    for (int i = 1; i < nSwitch + 1; i++) {
+        string fifoDirWrite = "./fifo-0-" + to_string(i);
+        string fifoDirRead = "./fifo-" + to_string(i) + "-0";
 
         //Make readfifo and open it store it in fd[][0].
-        if (mkfifo(fifoDirRead.c_str(),(mode_t) 0777) < 0)perror(strerror(errno));
+        if (mkfifo(fifoDirRead.c_str(), (mode_t) 0777) < 0)perror(strerror(errno));
 
-        int fileDescRead = open(fifoDirRead.c_str(),O_RDONLY|O_NONBLOCK);
-        if (fileDescRead<0){
+        int fileDescRead = open(fifoDirRead.c_str(), O_RDONLY | O_NONBLOCK);
+        if (fileDescRead < 0) {
             perror("Error in opening readFIFO");
             exit(EXIT_FAILURE);
-        }
-        else{
-            cout<<"opened fifo-"+to_string(i)+"-0"<<endl;
-            fd[i-1][0] = fileDescRead;
-            pollfd[i-1].fd = fileDescRead;
-            pollfd[i-1].events = POLLIN;
-            pollfd[i-1].revents = 0;
+        } else {
+            cout << "opened fifo-" + to_string(i) + "-0" << endl;
+            fd[i - 1][0] = fileDescRead;
+            pollfd[i - 1].fd = fileDescRead;
+            pollfd[i - 1].events = POLLIN;
+            pollfd[i - 1].revents = 0;
         }
 
         done[i] = 0;
         //Make writefifo and open it store it in fd[][1].
 
-//        //READER MUST OPEN FIFO BEFORE THE WRITER CAN
-//        if (mkfifo(fifoDirWrite.c_str(),(mode_t) 0777) < 0)perror(strerror(errno));
-//        int fileDescWrite = open(fifoDirWrite.c_str(),O_WRONLY|O_NONBLOCK);
-//        if (fileDescWrite<0){
-//            perror("Error in opening writeFIFO");
-//            exit(EXIT_FAILURE);
-//        }
-//        else {
-//            fd[i-1][1] = fileDescWrite;
-//        }
 
-    }
-    //Controller loop
-    char buf[MAX_BUFF];
-    int inLen;
-    vector<switch_t> switchArr;
-    while(1){
-        int rval=poll(pollfd,nSwitch,timeout);
-        if (rval < 0){
-            perror("Error in polling in controller");
-            exit(EXIT_FAILURE);
-        }
-        else if (rval == 0 ); //Do Nothing
-        else{
-            //cout<<rval<<endl;
-            for(int i=0;i<nSwitch;i++){
-                if(pollfd[i].revents & POLLIN){
-                    memset(buf, 0, MAX_BUFF);
-                    inLen = read(fd[i][0],buf,MAX_BUFF);
+        //Controller loop
+        char buf[MAX_BUFF];
+        int inLen;
+        vector<switch_t> switchArr;
+        while (1) {
+            int rval = poll(pollfd, nSwitch, timeout);
+            if (rval < 0) {
+                perror("Error in polling in controller");
+                exit(EXIT_FAILURE);
+            } else if (rval == 0); //Do Nothing
+            else {
+                //cout<<rval<<endl;
+                for (int i = 0; i < nSwitch; i++) {
+                    if (pollfd[i].revents & POLLIN) {
+                        memset(buf, 0, MAX_BUFF);
+                        inLen = read(fd[i][0], buf, MAX_BUFF);
 //                    for(int j=0;j<inLen;j++){
 //                        if (buf[j] == 0){
 //                            break;
 //                        }
 //                        cout<<buf[j];
 //                    }
-                    string output = (string) buf;
-                    cout<<output<<endl;
-                    vector<string>tokens = tokenize(output);
-                    switch(stoi(tokens[0])){
-                        case OPEN:
-                            handleOpen(tokens,fd,switchArr);
-                            break;
+                        string output = (string) buf;
+                        cout << output << endl;
+                        vector<string> tokens = tokenize(output);
+                        switch (stoi(tokens[0])) {
+                            case OPEN:
+                                handleOpen(tokens, fd, switchArr);
+                                break;
 
-                        case QUERY:
-                            handleQuery(tokens,fd,switchArr);
-                            break;
+                            case QUERY:
+                                handleQuery(tokens, fd, switchArr);
+                                cout << "HANDLIN QUERY" << endl;
+                                break;
+                        }
                     }
                 }
-
             }
         }
     }
-
-};
-
+}
 void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
     int timeout = 0;
     int fd[4][2];
@@ -398,6 +477,7 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
                         case ADD:
                             cout<<"Got ADD"<<endl;
                             break;
+
                     }
 
                 }

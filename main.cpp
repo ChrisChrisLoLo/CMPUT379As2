@@ -299,17 +299,19 @@ void progController(int nSwitch) {
 void handleAdd(vector<string> tokens, vector<flow_rule> flowTable, vector<traf_t> todoList){
     //create new rule from the cont message and add it to the flow table
 
-    flow_rule newRule;
-    newRule.srcIpLo = stoi(tokens[1]);
-    newRule.srcIpHi = stoi(tokens[2]);
-    newRule.destIpLo = stoi(tokens[3]);
-    newRule.destIpHi = stoi(tokens[4]);
-    newRule.actionType = stoi(tokens[5]);
-    newRule.actionVal = stoi(tokens[6]);
-    newRule.pri = stoi(tokens[7]);
-    newRule.pktCount = 0;
-
-    flowTable.push_back(newRule);
+//    flow_rule newRule;
+//    newRule.srcIpLo = stoi(tokens[1]);
+//    newRule.srcIpHi = stoi(tokens[2]);
+//    newRule.destIpLo = stoi(tokens[3]);
+//    newRule.destIpHi = stoi(tokens[4]);
+//    newRule.actionType = stoi(tokens[5]);
+//    newRule.actionVal = stoi(tokens[6]);
+//    newRule.pri = stoi(tokens[7]);
+//    newRule.pktCount = 0;
+//
+//    //flowTable.push_back(newRule);
+//    flowTable.push_back({stoi(tokens[1]),stoi(tokens[2]),stoi(tokens[3]),
+//            stoi(tokens[4]),stoi(tokens[5]),stoi(tokens[6]),stoi(tokens[7]),0});
 
     //now that new rule is added, go through all todoTraffic in the traffic list.
     //Mark any traffic resolved as true, and add them to a list to remove from.
@@ -525,6 +527,8 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
 
                         case ADD:
                             cout<<"Got ADD"<<endl;
+                            flowTable.push_back({stoi(tokens[1]),stoi(tokens[2]),stoi(tokens[3]),
+                                                 stoi(tokens[4]),stoi(tokens[5]),stoi(tokens[6]),stoi(tokens[7]),0});
                             handleAdd(tokens,flowTable,todoList);
                             break;
 

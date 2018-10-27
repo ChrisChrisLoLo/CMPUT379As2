@@ -102,6 +102,49 @@ struct switch_t{
     int ipHigh;
 };
 
+void findFLowRule(int initTrafIp, int dstTrafIp, int swi, int fd[][2], vector<flow_rule> &flowTable, vector<traf_t> &todoList ) {
+    bool resolved = false;
+    flow_rule foundRule = {0};
+
+    //find rule that matches packet
+    for (int i = 0; i < flowTable.size(); i++) {
+    //if traffic ip matches on in the rule set
+        if (initTrafIp <= flowTable[i].srcIpHi && initTrafIp >= flowTable[i].srcIpLo) {
+            if (dstTrafIp <= flowTable[i].destIpHi && dstTrafIp >= flowTable[i].destIpLo) {
+                flowTable[i].pktCount += 1;
+                foundRule = flowTable[i];
+                resolved = true;
+                break;
+            }
+        }
+    }
+    //if no rule
+    if (!resolved) {
+    //ask controller for help. query the traffic in a vector
+        cout << "Ask controller for help" << endl;
+        char buf[MAX_BUFF];
+        string queryPacket =
+                to_string(QUERY) + " " + to_string(swi) + " " + to_string(initTrafIp) + " " + to_string(dstTrafIp);
+        fdPrint(fd[CONT_FD][1], buf, queryPacket);
+        traf_t todoTraf;
+        todoTraf.swi = swi;
+        todoTraf.ipSrc = initTrafIp;
+        todoTraf.ipDst = dstTrafIp;
+        todoList.push_back(todoTraf);
+    } else {
+        switch (foundRule.actionType) {
+            case FORWARD:
+    //Deliver the package
+                cout << "DELIVERED" << endl;
+                break;
+
+            case DROP:
+                cout << "DROPPED" << endl;
+                break;
+
+        }
+    }
+}
 
 void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
     int sourceSw = stoi(tokens[1]);
@@ -461,6 +504,8 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
                             case DROP:
                                 cout<<"DROPPED"<<endl;
                                 break;
+
+                                case
                         }
                     }
                 }

@@ -13,6 +13,8 @@
 #include <poll.h>
 #include <sstream>
 #include <iterator>
+#include <vector>
+
 //TODO:SET LIMIT TO 10 MIN
 #define RLIM_CUR 100 * 60
 #define RLIM_MAX 100 * 60
@@ -76,11 +78,7 @@ vector<string> tokenize(string input){
     vector<string> results(istream_iterator<string>{iss}, istream_iterator<string>());
     return results;
 }
-//
-//string detokenize(vector<string> input){
-//    string s;
-//    return copy(input.begin(), input.end(), ostream_iterator<string>(&s, " "));
-//}
+
 ifstream trafficFile;
 
 
@@ -104,47 +102,6 @@ struct switch_t{
     int ipHigh;
 };
 
-
-//void sendRules(int fd[][2],vector<switch_t> swArr, int sourceSw, int dstIp){
-//    bool switchFound=false;
-//    for(int i=0;i<swArr.size();i++){
-//        if(dstIp>=swArr[i].ipLow && dstIp<=swArr[i].ipHigh){
-//            //ip destination matches current switch
-//            //fd[swArr[i].swi-1][1];
-//            char buf[MAX_BUFF];
-//            if (sourceSw < swArr[i].swi) {
-//                //send rule to current switch
-//
-//                //srcIP_lo, srcIP_hi, destIP_low, destIP_high, forward, actionVal , pri, pketcount
-//                string forwardRightPacket = (string)"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
-//                        +to_string(FORWARD)+" "+to_string(SEND_RIGHT)+to_string(MIN_PRI)+" "+"0";
-//
-//                //send to all switches in range [sourceSwitch,destinationSwitch);
-//
-//                for(int j = sourceSw;j<swArr[i].swi;j++){
-//                    fdPrint(fd[j-1][1],buf,forwardRightPacket);
-//                }
-//                switchFound = true;
-//            }
-//            else if (sourceSw > swArr[i].swi){
-//                string forwardLeftPacket = (string)"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
-//                        +to_string(FORWARD)+" "+to_string(SEND_LEFT)+to_string(MIN_PRI)+" "+"0";
-//
-//                //send to all switches in range [sourceSwitch,destinationSwitch);
-//
-//                for(int j = sourceSw; j>swArr[i].swi;j--){
-//                    fdPrint(fd[swArr[i].swi-1][1],buf,forwardLeftPacket);
-//                }
-//                switchFound = true;
-//            }
-//        }
-//        if(!switchFound){
-//            //no switch found, tell switch to drop package
-//            string dropPacket = "0 1000"+to_string(dstIp)+" "+to_string(dstIp)+" "
-//                    +to_string(DROP)+" "+to_string(MIN_PRI)+" "+"0";
-//        }
-//    }
-//}
 
 void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
     int sourceSw = stoi(tokens[1]);
@@ -296,7 +253,7 @@ void progController(int nSwitch) {
 }
 //ADD, srcIP_lo, srcIP_hi, destIP_low, destIP_high, actionType, actionVal , pri, pketcount
 
-void handleAdd(vector<string> tokens, vector<flow_rule> flowTable, vector<traf_t> todoList){
+void handleAdd(vector<string> tokens, vector<flow_rule> &flowTable, vector<traf_t> &todoList){
     //create new rule from the cont message and add it to the flow table
 
 //    flow_rule newRule;
@@ -312,6 +269,8 @@ void handleAdd(vector<string> tokens, vector<flow_rule> flowTable, vector<traf_t
 //    //flowTable.push_back(newRule);
 //    flowTable.push_back({stoi(tokens[1]),stoi(tokens[2]),stoi(tokens[3]),
 //            stoi(tokens[4]),stoi(tokens[5]),stoi(tokens[6]),stoi(tokens[7]),0});
+    flowTable.push_back({stoi(tokens[1]),stoi(tokens[2]),stoi(tokens[3]),
+                         stoi(tokens[4]),stoi(tokens[5]),stoi(tokens[6]),stoi(tokens[7]),0});
 
     //now that new rule is added, go through all todoTraffic in the traffic list.
     //Mark any traffic resolved as true, and add them to a list to remove from.
@@ -326,6 +285,7 @@ void handleAdd(vector<string> tokens, vector<flow_rule> flowTable, vector<traf_t
                     //foundRule = flowTable[j];
                     resolved = true;
                     cout<<"RESOLVED"<<endl;
+                    break;
                 }
             }
         }
@@ -344,7 +304,7 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
     int timeout = 0;
     int fd[4][2];
     struct pollfd pollfd[3];
-    cout<<endl<<swi<<endl<<swj<<endl<<swk<<endl<<ipLow<<ipHigh<<endl;
+    //cout<<endl<<swi<<endl<<swj<<endl<<swk<<endl<<ipLow<<ipHigh<<endl;
     string fifoDirWrite = "./fifo-"+to_string(swi)+"-0";
     string fifoDirRead = "./fifo-0-"+to_string(swi);
 
@@ -364,7 +324,7 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
     }
     //////if (mkfifo(fifoDirWrite.c_str(),(mode_t) 0777) < 0)perror(strerror(errno));
     //close(fd[CONT_FD][0]);
-    cout<<"opening " + fifoDirWrite<<endl;
+    //cout<<"opening " + fifoDirWrite<<endl;
     int fileDescWrite = open(fifoDirWrite.c_str(),O_WRONLY|O_NONBLOCK);
 
 //    int fileDescWrite = open("./fifo-1-0",O_WRONLY|O_NONBLOCK);
@@ -403,7 +363,7 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
         if (mkfifo(fifoSwkRead.c_str(),(mode_t) 0777) < 0) {
             cout << "fifo already made" << endl;
         }
-        cout<<"opening"<<fifoSwkRead<<endl;
+        //cout<<"opening"<<fifoSwkRead<<endl;
         int fileSwkRead = open(fifoSwkRead.c_str(),O_RDONLY|O_NONBLOCK);
         if (fileSwkRead<0){
             perror("Error in opening swk readFIFO");
@@ -444,6 +404,14 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
             +to_string(ipLow)+" "+to_string(ipHigh) ;
     fdPrint(fd[CONT_FD][1],outBuf,openPacket);
 
+
+    //Block switch until it has recieved awknowledgement. We need to do this for sync purposes.
+    memset(inBuf, 0,MAX_BUFF);
+    while(read(fd[CONT_FD][0], inBuf, MAX_BUFF)<0) {
+
+    }
+    cout << "I read" << endl;
+    cout << inBuf << endl;
     string trafLine;
     while(1){
         //read line from traffic file
@@ -451,7 +419,7 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
             if(getline(trafficFile,trafLine)){
                 vector<string> trafTokens = tokenize(trafLine);
                 if (trafTokens[0] == (string)"sw"+to_string(swi)){
-                    cout<<"FOUND A RULE FOR ME"<<endl;
+                    cout<<"FOUND A Traffic line FOR ME"<<endl;
 
                     int initTrafIp = stoi(trafTokens[1]);
                     int dstTrafIp = stoi(trafTokens[2]);
@@ -466,6 +434,7 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
                                 flowTable[i].pktCount += 1;
                                 foundRule = flowTable[i];
                                 resolved = true;
+                                break;
                             }
                         }
                     }
@@ -527,8 +496,7 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
 
                         case ADD:
                             cout<<"Got ADD"<<endl;
-                            flowTable.push_back({stoi(tokens[1]),stoi(tokens[2]),stoi(tokens[3]),
-                                                 stoi(tokens[4]),stoi(tokens[5]),stoi(tokens[6]),stoi(tokens[7]),0});
+
                             handleAdd(tokens,flowTable,todoList);
                             break;
 

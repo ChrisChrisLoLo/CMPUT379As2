@@ -125,8 +125,26 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
                 string forwardRightPacket = (string) to_string(ADD)+" "+"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
                                             +to_string(SEND)+" "+to_string(SEND_RIGHT)+" "+to_string(MIN_PRI)+" "+"0";
 
-                //send to all switches in range [sourceSwitch,destinationSwitch);
 
+                bool canTravel = true;
+                //double check that there are intermediary switches that can carry the package
+                for(int j = sourceSw;j<swArr[i].swi;j++){
+                    bool matches = false;
+                    for(int k=0; k<swArr.size();k++){
+                        if(j==swArr[k].swi){
+                            matches = true;
+                        }
+                    }
+                    if(!matches){
+                        canTravel = false;
+                    }
+                }
+                if(!canTravel){
+                    continue;
+                }
+
+
+                //send to all switches in range [sourceSwitch,destinationSwitch);
                 for(int j = sourceSw;j<swArr[i].swi;j++){
                     fdPrint(fd[j-1][1],buf,forwardRightPacket);
                 }
@@ -134,7 +152,27 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
             }
             else if (sourceSw > swArr[i].swi){
                 string forwardLeftPacket = (string) to_string(ADD)+" "+"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
-                                           +to_string(SEND)+" "+to_string(SEND_LEFT)+to_string(MIN_PRI)+" "+"0";
+                                           +to_string(SEND)+" "+to_string(SEND_LEFT)+" "+to_string(MIN_PRI)+" "+"0";
+
+
+                bool canTravel = true;
+                //double check that there are intermediary switches that can carry the package
+                for(int j = sourceSw;j>swArr[i].swi;j--){
+                    bool matches = false;
+                    for(int k=0; k<swArr.size();k++){
+                        if(j==swArr[k].swi) {
+                            if (j == swArr[k].swi) {
+                                matches = true;
+                            }
+                        }
+                    }
+                    if(!matches){
+                        canTravel = false;
+                    }
+                }
+                if(!canTravel){
+                    continue;
+                }
 
                 //send to all switches in range [sourceSwitch,destinationSwitch);
 

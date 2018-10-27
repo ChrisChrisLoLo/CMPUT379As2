@@ -31,6 +31,7 @@
 
 #define DROP 2
 #define FORWARD 3
+#define SEND 4
 
 #define CONT_FD 0
 #define SWJ_FD 1
@@ -42,6 +43,7 @@
 
 #define MAX_BUFF 80
 
+//Note that SWJ_FD = SEND_LEFT and SWK_FD = SEND RIGHT. THIS IS NEEDED.
 #define SEND_LEFT 1
 #define SEND_RIGHT 2
 
@@ -102,49 +104,7 @@ struct switch_t{
     int ipHigh;
 };
 
-void findFLowRule(int initTrafIp, int dstTrafIp, int swi, int fd[][2], vector<flow_rule> &flowTable, vector<traf_t> &todoList ) {
-    bool resolved = false;
-    flow_rule foundRule = {0};
 
-    //find rule that matches packet
-    for (int i = 0; i < flowTable.size(); i++) {
-    //if traffic ip matches on in the rule set
-        if (initTrafIp <= flowTable[i].srcIpHi && initTrafIp >= flowTable[i].srcIpLo) {
-            if (dstTrafIp <= flowTable[i].destIpHi && dstTrafIp >= flowTable[i].destIpLo) {
-                flowTable[i].pktCount += 1;
-                foundRule = flowTable[i];
-                resolved = true;
-                break;
-            }
-        }
-    }
-    //if no rule
-    if (!resolved) {
-    //ask controller for help. query the traffic in a vector
-        cout << "Ask controller for help" << endl;
-        char buf[MAX_BUFF];
-        string queryPacket =
-                to_string(QUERY) + " " + to_string(swi) + " " + to_string(initTrafIp) + " " + to_string(dstTrafIp);
-        fdPrint(fd[CONT_FD][1], buf, queryPacket);
-        traf_t todoTraf;
-        todoTraf.swi = swi;
-        todoTraf.ipSrc = initTrafIp;
-        todoTraf.ipDst = dstTrafIp;
-        todoList.push_back(todoTraf);
-    } else {
-        switch (foundRule.actionType) {
-            case FORWARD:
-    //Deliver the package
-                cout << "DELIVERED" << endl;
-                break;
-
-            case DROP:
-                cout << "DROPPED" << endl;
-                break;
-
-        }
-    }
-}
 
 void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
     int sourceSw = stoi(tokens[1]);
@@ -163,7 +123,7 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
 
                 //srcIP_lo, srcIP_hi, destIP_low, destIP_high, forward, actionVal , pri, pketcount
                 string forwardRightPacket = (string) to_string(ADD)+" "+"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
-                                            +to_string(FORWARD)+" "+to_string(SEND_RIGHT)+to_string(MIN_PRI)+" "+"0";
+                                            +to_string(RELAY)+" "+to_string(SEND_RIGHT)+to_string(MIN_PRI)+" "+"0";
 
                 //send to all switches in range [sourceSwitch,destinationSwitch);
 
@@ -174,7 +134,7 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
             }
             else if (sourceSw > swArr[i].swi){
                 string forwardLeftPacket = (string) to_string(ADD)+" "+"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
-                                           +to_string(FORWARD)+" "+to_string(SEND_LEFT)+to_string(MIN_PRI)+" "+"0";
+                                           +to_string(RELAY)+" "+to_string(SEND_LEFT)+to_string(MIN_PRI)+" "+"0";
 
                 //send to all switches in range [sourceSwitch,destinationSwitch);
 
@@ -294,30 +254,81 @@ void progController(int nSwitch) {
         }
     }
 }
+void findFlowRule(int initTrafIp, int dstTrafIp, int swi, int swj, int swk, int fd[][2], vector<flow_rule> &flowTable, vector<traf_t> &todoList ) {
+    bool resolved = false;
+    flow_rule foundRule = {0};
+    char buf[MAX_BUFF];
+    //find rule that matches packet
+    for (int i = 0; i < flowTable.size(); i++) {
+        //if traffic ip matches on in the rule set
+        if (initTrafIp <= flowTable[i].srcIpHi && initTrafIp >= flowTable[i].srcIpLo) {
+            if (dstTrafIp <= flowTable[i].destIpHi && dstTrafIp >= flowTable[i].destIpLo) {
+                flowTable[i].pktCount += 1;
+                foundRule = flowTable[i];
+                resolved = true;
+                break;
+            }
+        }
+    }
+    //if no rule
+    if (!resolved) {
+        //ask controller for help. query the traffic in a vector
+        cout << "Ask controller for help" << endl;
+
+        string queryPacket =
+                to_string(QUERY) + " " + to_string(swi) + " " + to_string(initTrafIp) + " " + to_string(dstTrafIp);
+        fdPrint(fd[CONT_FD][1], buf, queryPacket);
+        traf_t todoTraf;
+        todoTraf.swi = swi;
+        todoTraf.ipSrc = initTrafIp;
+        todoTraf.ipDst = dstTrafIp;
+        todoList.push_back(todoTraf);
+    } else {
+        switch (foundRule.actionType) {
+            case FORWARD:
+                //Deliver the package
+                cout << "DELIVERED" << endl;
+                break;
+
+            case DROP:
+                cout << "DROPPED" << endl;
+                break;
+
+            case SEND:
+
+                string destSwitch = (foundRule.actionVal == SEND_LEFT)?to_string(swj):to_string(swk);
+                string fifoDirWrite = "./fifo-"+to_string(swi)+"-"+destSwitch;
+                int fileDescWrite = open(fifoDirWrite.c_str(),O_WRONLY|O_NONBLOCK);
+                if (fileDescWrite<0){
+                    perror("Error in opening switch writeFIFO");
+                    exit(EXIT_FAILURE);
+                }
+                fd[foundRule.actionVal][1] = fileDescWrite;
+
+
+                string relayPacket = to_string(RELAY)+" "+to_string(initTrafIp)+" "+to_string(dstTrafIp);
+                if (foundRule.actionVal == SEND_LEFT){
+                    fdPrint(fd[SWJ_FD][1], buf, relayPacket);
+                }
+                else if (foundRule.actionVal == SEND_RIGHT){
+                    fdPrint(fd[SWK_FD][1], buf, relayPacket);
+                }
+                break;
+        }
+    }
+}
 //ADD, srcIP_lo, srcIP_hi, destIP_low, destIP_high, actionType, actionVal , pri, pketcount
 
-void handleAdd(vector<string> tokens, vector<flow_rule> &flowTable, vector<traf_t> &todoList){
+void handleAdd(vector<string> tokens, vector<flow_rule> &flowTable, vector<traf_t> &todoList,int swi,int swj, int swk,int fd[][2]){
     //create new rule from the cont message and add it to the flow table
 
-//    flow_rule newRule;
-//    newRule.srcIpLo = stoi(tokens[1]);
-//    newRule.srcIpHi = stoi(tokens[2]);
-//    newRule.destIpLo = stoi(tokens[3]);
-//    newRule.destIpHi = stoi(tokens[4]);
-//    newRule.actionType = stoi(tokens[5]);
-//    newRule.actionVal = stoi(tokens[6]);
-//    newRule.pri = stoi(tokens[7]);
-//    newRule.pktCount = 0;
-//
-//    //flowTable.push_back(newRule);
-//    flowTable.push_back({stoi(tokens[1]),stoi(tokens[2]),stoi(tokens[3]),
-//            stoi(tokens[4]),stoi(tokens[5]),stoi(tokens[6]),stoi(tokens[7]),0});
     flowTable.push_back({stoi(tokens[1]),stoi(tokens[2]),stoi(tokens[3]),
                          stoi(tokens[4]),stoi(tokens[5]),stoi(tokens[6]),stoi(tokens[7]),0});
 
     //now that new rule is added, go through all todoTraffic in the traffic list.
     //Mark any traffic resolved as true, and add them to a list to remove from.
     vector<bool> trafResolved;
+
     for(int i=0;i<todoList.size();i++){
         bool resolved = false;
         for(int j=0;j<flowTable.size();j++){
@@ -327,7 +338,38 @@ void handleAdd(vector<string> tokens, vector<flow_rule> &flowTable, vector<traf_
                     flowTable[j].pktCount += 1;
                     //foundRule = flowTable[j];
                     resolved = true;
-                    cout<<"RESOLVED"<<endl;
+                    flow_rule foundRule = flowTable[i];
+                    switch (foundRule.actionType){
+
+                        case FORWARD:
+                            cout << "New Rule tells DELIVERED" <<endl;
+                            break;
+
+                        case DROP:
+                            cout << "New Rule tells DROPPED" << endl;
+                            break;
+
+                        case SEND:
+                            char buf[MAX_BUFF];
+                            string destSwitch = (foundRule.actionVal == SEND_LEFT)?to_string(swj):to_string(swk);
+                            string fifoDirWrite = "./fifo-"+to_string(swi)+"-"+destSwitch;
+                            int fileDescWrite = open(fifoDirWrite.c_str(),O_WRONLY|O_NONBLOCK);
+                            if (fileDescWrite<0){
+                                perror("Error in opening switch writeFIFO");
+                                exit(EXIT_FAILURE);
+                            }
+                            fd[foundRule.actionVal][1] = fileDescWrite;
+
+
+                            string relayPacket = to_string(RELAY)+" "+to_string(todoList[i].ipSrc)+" "+to_string(todoList[i].ipDst);
+                            if (foundRule.actionVal == SEND_LEFT){
+                                fdPrint(fd[SWJ_FD][1], buf, relayPacket);
+                            }
+                            else if (foundRule.actionVal == SEND_RIGHT){
+                                fdPrint(fd[SWK_FD][1], buf, relayPacket);
+                            }
+                            break;
+                    }
                     break;
                 }
             }
@@ -464,50 +506,7 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
                 if (trafTokens[0] == (string)"sw"+to_string(swi)){
                     cout<<"FOUND A Traffic line FOR ME"<<endl;
 
-                    int initTrafIp = stoi(trafTokens[1]);
-                    int dstTrafIp = stoi(trafTokens[2]);
-                    bool resolved = false;
-                    flow_rule foundRule = {0};
-
-                    //find rule that matches packet
-                    for(int i=0;i<flowTable.size();i++){
-                        //if traffic ip matches on in the rule set
-                        if(initTrafIp <= flowTable[i].srcIpHi && initTrafIp >= flowTable[i].srcIpLo){
-                            if(dstTrafIp <= flowTable[i].destIpHi && dstTrafIp >= flowTable[i].destIpLo){
-                                flowTable[i].pktCount += 1;
-                                foundRule = flowTable[i];
-                                resolved = true;
-                                break;
-                            }
-                        }
-                    }
-                    //if no rule
-                    if(!resolved){
-                        //ask controller for help. query the traffic in a vector
-                        cout<<"Ask controller for help"<<endl;
-                        char buf[MAX_BUFF];
-                        string queryPacket = to_string(QUERY)+" "+to_string(swi)+" "+to_string(initTrafIp)+" "+to_string(dstTrafIp);
-                        fdPrint(fd[CONT_FD][1],buf,queryPacket);
-                        traf_t todoTraf;
-                        todoTraf.swi=swi;
-                        todoTraf.ipSrc=initTrafIp;
-                        todoTraf.ipDst=dstTrafIp;
-                        todoList.push_back(todoTraf);
-                    }
-                    else{
-                        switch(foundRule.actionType){
-                            case FORWARD:
-                                //Deliver the package
-                                cout<<"DELIVERED"<<endl;
-                                break;
-
-                            case DROP:
-                                cout<<"DROPPED"<<endl;
-                                break;
-
-                                case
-                        }
-                    }
+                    findFlowRule(stoi(trafTokens[1]),stoi(trafTokens[2]),swi,swj,swk,fd,flowTable,todoList);
                 }
             }
         }
@@ -537,12 +536,13 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
 
                         case RELAY:
                             cout<<"Got RELAY"<<endl;
+                            findFlowRule(stoi(tokens[1]),stoi(tokens[2]),swi,swj,swk,fd,flowTable,todoList);
                             break;
 
                         case ADD:
                             cout<<"Got ADD"<<endl;
 
-                            handleAdd(tokens,flowTable,todoList);
+                            handleAdd(tokens,flowTable,todoList,swi,swj,swk,fd);
                             break;
 
                     }
@@ -616,7 +616,7 @@ int main(int argc, char* argv[]){
             swj = -1;
         }
         else{
-            swj = (int) swjIn[2]-48;
+            swj = (int) swjIn[2]-'0';
 //            pExit("Error: swj is invalid");
         }
 
@@ -624,7 +624,7 @@ int main(int argc, char* argv[]){
             swk = -1;
         }
         else{
-            swk = (int) swkIn[2]-48;
+            swk = swkIn[2]-'0';
 //            pExit("Error: swk is invalid");
         }
         string ipRange = (string)argv[5];

@@ -29,9 +29,9 @@
 #define ADD 5
 #define RELAY 6
 
-#define DROP 2
-#define FORWARD 3
-#define SEND 4
+#define DROP 7
+#define FORWARD 8
+#define SEND 9
 
 #define CONT_FD 0
 #define SWJ_FD 1
@@ -123,7 +123,7 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
 
                 //srcIP_lo, srcIP_hi, destIP_low, destIP_high, forward, actionVal , pri, pketcount
                 string forwardRightPacket = (string) to_string(ADD)+" "+"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
-                                            +to_string(RELAY)+" "+to_string(SEND_RIGHT)+to_string(MIN_PRI)+" "+"0";
+                                            +to_string(SEND)+" "+to_string(SEND_RIGHT)+" "+to_string(MIN_PRI)+" "+"0";
 
                 //send to all switches in range [sourceSwitch,destinationSwitch);
 
@@ -134,7 +134,7 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
             }
             else if (sourceSw > swArr[i].swi){
                 string forwardLeftPacket = (string) to_string(ADD)+" "+"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
-                                           +to_string(RELAY)+" "+to_string(SEND_LEFT)+to_string(MIN_PRI)+" "+"0";
+                                           +to_string(SEND)+" "+to_string(SEND_LEFT)+to_string(MIN_PRI)+" "+"0";
 
                 //send to all switches in range [sourceSwitch,destinationSwitch);
 
@@ -156,7 +156,7 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
 
 
 
-void handleOpen(vector<string> tokens,int fd[][2],vector<switch_t> swArr){
+void handleOpen(vector<string> tokens,int fd[][2],vector<switch_t> &swArr){
     switch_t switchIn;
     switchIn.swi = stoi(tokens[1]);
     switchIn.swj = stoi(tokens[2]);
@@ -165,7 +165,7 @@ void handleOpen(vector<string> tokens,int fd[][2],vector<switch_t> swArr){
     switchIn.ipHigh = stoi(tokens[5]);
 
     //add switch to array.
-    swArr.push_back(switchIn);
+    swArr.push_back({stoi(tokens[1]),stoi(tokens[2]),stoi(tokens[3]),stoi(tokens[4]),stoi(tokens[5])});
 
     string fifoDirWrite = "./fifo-0-"+to_string(switchIn.swi);
     mkfifo(fifoDirWrite.c_str(),(mode_t) 0777);
@@ -216,50 +216,50 @@ void progController(int nSwitch) {
 
         done[i] = 0;
         //Make writefifo and open it store it in fd[][1].
+    }
 
+    //Controller loop
+    char buf[MAX_BUFF];
+    int inLen;
+    vector<switch_t> switchArr;
+    while (1) {
+        int rval = poll(pollfd, nSwitch, timeout);
+        if (rval < 0) {
+            perror("Error in polling in controller");
+            exit(EXIT_FAILURE);
+        } else if (rval == 0); //Do Nothing
+        else {
+            //cout<<rval<<endl;
+            for (int i = 0; i < nSwitch; i++) {
+                if (pollfd[i].revents & POLLIN) {
+                    memset(buf, 0, MAX_BUFF);
+                    inLen = read(fd[i][0], buf, MAX_BUFF);
 
-        //Controller loop
-        char buf[MAX_BUFF];
-        int inLen;
-        vector<switch_t> switchArr;
-        while (1) {
-            int rval = poll(pollfd, nSwitch, timeout);
-            if (rval < 0) {
-                perror("Error in polling in controller");
-                exit(EXIT_FAILURE);
-            } else if (rval == 0); //Do Nothing
-            else {
-                //cout<<rval<<endl;
-                for (int i = 0; i < nSwitch; i++) {
-                    if (pollfd[i].revents & POLLIN) {
-                        memset(buf, 0, MAX_BUFF);
-                        inLen = read(fd[i][0], buf, MAX_BUFF);
+                    string output = (string) buf;
+                    cout << output << endl;
+                    vector<string> tokens = tokenize(output);
+                    switch (stoi(tokens[0])) {
+                        case OPEN:
+                            handleOpen(tokens, fd, switchArr);
+                            break;
 
-                        string output = (string) buf;
-                        cout << output << endl;
-                        vector<string> tokens = tokenize(output);
-                        switch (stoi(tokens[0])) {
-                            case OPEN:
-                                handleOpen(tokens, fd, switchArr);
-                                break;
-
-                            case QUERY:
-                                handleQuery(tokens, fd, switchArr);
-                                cout << "HANDLIN QUERY" << endl;
-                                break;
-                        }
+                        case QUERY:
+                            handleQuery(tokens, fd, switchArr);
+                            cout << "HANDLIN QUERY" << endl;
+                            break;
                     }
                 }
             }
         }
     }
+
 }
 void findFlowRule(int initTrafIp, int dstTrafIp, int swi, int swj, int swk, int fd[][2], vector<flow_rule> &flowTable, vector<traf_t> &todoList ) {
     bool resolved = false;
     flow_rule foundRule = {0};
     char buf[MAX_BUFF];
-    //find rule that matches packet
-    for (int i = 0; i < flowTable.size(); i++) {
+    //find rule that matches packet. We want the most recent rule as the initial rule is a catch all
+    for (int i = flowTable.size()-1; i >= 0; i--) {
         //if traffic ip matches on in the rule set
         if (initTrafIp <= flowTable[i].srcIpHi && initTrafIp >= flowTable[i].srcIpLo) {
             if (dstTrafIp <= flowTable[i].destIpHi && dstTrafIp >= flowTable[i].destIpLo) {
@@ -283,7 +283,8 @@ void findFlowRule(int initTrafIp, int dstTrafIp, int swi, int swj, int swk, int 
         todoTraf.ipSrc = initTrafIp;
         todoTraf.ipDst = dstTrafIp;
         todoList.push_back(todoTraf);
-    } else {
+    }
+    else {
         switch (foundRule.actionType) {
             case FORWARD:
                 //Deliver the package
@@ -300,7 +301,7 @@ void findFlowRule(int initTrafIp, int dstTrafIp, int swi, int swj, int swk, int 
                 string fifoDirWrite = "./fifo-"+to_string(swi)+"-"+destSwitch;
                 int fileDescWrite = open(fifoDirWrite.c_str(),O_WRONLY|O_NONBLOCK);
                 if (fileDescWrite<0){
-                    perror("Error in opening switch writeFIFO");
+                    perror("Error in opening relay switch writeFIFO");
                     exit(EXIT_FAILURE);
                 }
                 fd[foundRule.actionVal][1] = fileDescWrite;
@@ -322,6 +323,16 @@ void findFlowRule(int initTrafIp, int dstTrafIp, int swi, int swj, int swk, int 
 void handleAdd(vector<string> tokens, vector<flow_rule> &flowTable, vector<traf_t> &todoList,int swi,int swj, int swk,int fd[][2]){
     //create new rule from the cont message and add it to the flow table
 
+//    struct flow_rule{
+//        int srcIpLo;
+//        int srcIpHi;
+//        int destIpLo;
+//        int destIpHi;
+//        int actionType;
+//        int actionVal;
+//        int pri;
+//        int pktCount;
+//    };
     flowTable.push_back({stoi(tokens[1]),stoi(tokens[2]),stoi(tokens[3]),
                          stoi(tokens[4]),stoi(tokens[5]),stoi(tokens[6]),stoi(tokens[7]),0});
 
@@ -331,14 +342,14 @@ void handleAdd(vector<string> tokens, vector<flow_rule> &flowTable, vector<traf_
 
     for(int i=0;i<todoList.size();i++){
         bool resolved = false;
-        for(int j=0;j<flowTable.size();j++){
+        for(int j=flowTable.size()-1;j>=0;j--){
             //if traffic ip matches on in the rule set
             if(todoList[i].ipSrc <= flowTable[j].srcIpHi && todoList[i].ipSrc >= flowTable[j].srcIpLo){
                 if(todoList[i].ipDst <= flowTable[j].destIpHi && todoList[i].ipDst >= flowTable[j].destIpLo){
                     flowTable[j].pktCount += 1;
                     //foundRule = flowTable[j];
                     resolved = true;
-                    flow_rule foundRule = flowTable[i];
+                    flow_rule foundRule = flowTable[j];
                     switch (foundRule.actionType){
 
                         case FORWARD:
@@ -355,7 +366,8 @@ void handleAdd(vector<string> tokens, vector<flow_rule> &flowTable, vector<traf_
                             string fifoDirWrite = "./fifo-"+to_string(swi)+"-"+destSwitch;
                             int fileDescWrite = open(fifoDirWrite.c_str(),O_WRONLY|O_NONBLOCK);
                             if (fileDescWrite<0){
-                                perror("Error in opening switch writeFIFO");
+                                perror("Error in opening send switch writeFIFO");
+                                cout<<fifoDirWrite<<endl;
                                 exit(EXIT_FAILURE);
                             }
                             fd[foundRule.actionVal][1] = fileDescWrite;
@@ -444,11 +456,7 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
     if(swk != -1){
         string fifoSwkWrite = "./fifo-"+to_string(swi)+"-"+to_string(swk);
         string fifoSwkRead = "./fifo-"+to_string(swk)+"-"+to_string(swi);
-//        if (mkfifo(fifoSwkRead.c_str(),(mode_t) 0777) < 0)perror(strerror(errno));
-        if (mkfifo(fifoSwkRead.c_str(),(mode_t) 0777) < 0) {
-            cout << "fifo already made" << endl;
-        }
-        //cout<<"opening"<<fifoSwkRead<<endl;
+        if (mkfifo(fifoSwkRead.c_str(),(mode_t) 0777) < 0)perror(strerror(errno));
         int fileSwkRead = open(fifoSwkRead.c_str(),O_RDONLY|O_NONBLOCK);
         if (fileSwkRead<0){
             perror("Error in opening swk readFIFO");
@@ -503,7 +511,8 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
         if (trafficFile.is_open()) {
             if(getline(trafficFile,trafLine)){
                 vector<string> trafTokens = tokenize(trafLine);
-                if (trafTokens[0] == (string)"sw"+to_string(swi)){
+
+                if (trafTokens.size() > 0 && trafTokens[0] == (string)"sw"+to_string(swi)){
                     cout<<"FOUND A Traffic line FOR ME"<<endl;
 
                     findFlowRule(stoi(trafTokens[1]),stoi(trafTokens[2]),swi,swj,swk,fd,flowTable,todoList);

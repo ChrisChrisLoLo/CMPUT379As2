@@ -1,0 +1,16 @@
+cont 3
+sw1 src.txt null sw2 100-199
+sw2 src.txt sw1 sw3 200-299
+sw3 src.txt sw2 null 300-399
+
+sw1  100  102
+sw2  200  300
+sw3  200  300
+sw1  100  103
+sw1  100  104
+sw1  100  300
+sw1  100  200
+sw1  100  201
+sw1  100  300
+sw1  100  699
+sw3  300  100

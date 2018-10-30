@@ -63,6 +63,23 @@ struct traf_t{
     int ipSrc;
     int ipDst;
 };
+
+struct packStat_t{
+    int rOpen=0;
+    int rQuery=0;
+    int rAdmit=0;
+    int rAck=0;
+    int rAdd=0;
+    int rRelay=0;
+    int tAck=0;
+    int tAdd=0;
+    int tOpen=0;
+    int tQuery=0;
+    int tRelay=0;
+};
+
+packStat_t pStat;
+
 using namespace std;
 
 //Checks if number, taken from:
@@ -278,10 +295,12 @@ void progController(int nSwitch) {
                     vector<string> tokens = tokenize(output);
                     switch (stoi(tokens[0])) {
                         case OPEN:
+                            pStat.rOpen++;
                             handleOpen(tokens, fd, switchArr);
                             break;
 
                         case QUERY:
+                            pStat.rQuery++;
                             handleQuery(tokens, fd, switchArr);
                             cout << "HANDLIN QUERY" << endl;
                             break;
@@ -316,6 +335,7 @@ void findFlowRule(int initTrafIp, int dstTrafIp, int swi, int swj, int swk, int 
         string queryPacket =
                 to_string(QUERY) + " " + to_string(swi) + " " + to_string(initTrafIp) + " " + to_string(dstTrafIp);
         fdPrint(fd[CONT_FD][1], buf, queryPacket);
+        pStat.tQuery++;
         traf_t todoTraf;
         todoTraf.swi = swi;
         todoTraf.ipSrc = initTrafIp;
@@ -352,12 +372,13 @@ void findFlowRule(int initTrafIp, int dstTrafIp, int swi, int swj, int swk, int 
                 else if (foundRule.actionVal == SEND_RIGHT){
                     fdPrint(fd[SWK_FD][1], buf, relayPacket);
                 }
+                pStat.tRelay++;
                 break;
         }
     }
 }
 //ADD, srcIP_lo, srcIP_hi, destIP_low, destIP_high, actionType, actionVal , pri, pketcount
-
+//NOTE: It is possible for there to be more ADD packets than rules when listing. THis is becuase not all ADDS result in a new rule.
 void handleAdd(vector<string> tokens, vector<flow_rule> &flowTable, vector<traf_t> &todoList,int swi,int swj, int swk,int fd[][2]){
     //create new rule from the cont message and add it to the flow table
 
@@ -371,8 +392,24 @@ void handleAdd(vector<string> tokens, vector<flow_rule> &flowTable, vector<traf_
 //        int pri;
 //        int pktCount;
 //    };
-    flowTable.push_back({stoi(tokens[1]),stoi(tokens[2]),stoi(tokens[3]),
-                         stoi(tokens[4]),stoi(tokens[5]),stoi(tokens[6]),stoi(tokens[7]),0});
+    flow_rule newRule ={stoi(tokens[1]),stoi(tokens[2]),stoi(tokens[3]),
+                        stoi(tokens[4]),stoi(tokens[5]),stoi(tokens[6]),stoi(tokens[7]),0};
+
+    //Some times a switch can ask for the same rule multiple times, as it does not wait to recieve a rule.
+    //To prevent this, check if the rule we have just added
+    bool duplicateRule = false;
+    for(int i=0;i<flowTable.size();i++){
+        if (newRule.srcIpHi==flowTable[i].srcIpHi&&
+            newRule.srcIpLo==flowTable[i].srcIpLo&&
+            newRule.destIpHi==flowTable[i].destIpHi&&
+            newRule.destIpLo==flowTable[i].destIpLo&&
+            newRule.actionType==flowTable[i].actionType){
+                duplicateRule = true;
+        }
+    }
+    if(!duplicateRule){
+        flowTable.push_back(newRule);
+    }
 
     //now that new rule is added, go through all todoTraffic in the traffic list.
     //Mark any traffic resolved as true, and add them to a list to remove from.
@@ -457,12 +494,8 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
         pollfd[CONT_FD].events = POLLIN;
         pollfd[CONT_FD].revents = 0;
     }
-    //////if (mkfifo(fifoDirWrite.c_str(),(mode_t) 0777) < 0)perror(strerror(errno));
-    //close(fd[CONT_FD][0]);
-    //cout<<"opening " + fifoDirWrite<<endl;
+    \
     int fileDescWrite = open(fifoDirWrite.c_str(),O_WRONLY|O_NONBLOCK);
-
-//    int fileDescWrite = open("./fifo-1-0",O_WRONLY|O_NONBLOCK);
 
     if (fileDescWrite<0){
         perror("Error in opening controller writeFIFO");
@@ -525,6 +558,12 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
 
     flowTable.push_back(initRule);
 
+    //Initialize a file descriptor for standard input
+    struct pollfd keyboardFd[1];
+    keyboardFd[0].fd = STDOUT_FILENO;
+    keyboardFd[1].events=POLLIN;
+    keyboardFd[2].revents=0;
+
     char outBuf[MAX_BUFF];
     char inBuf[MAX_BUFF];
     int inLen;
@@ -534,16 +573,17 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
             +to_string(swj)+" "+to_string(swk)+" "
             +to_string(ipLow)+" "+to_string(ipHigh) ;
     fdPrint(fd[CONT_FD][1],outBuf,openPacket);
-
+    pStat.tOpen++;
 
     //Block switch until it has recieved awknowledgement. We need to do this for sync purposes.
+    //While concurrency is important for this assignment all concurrency is meaningless if initial
+    //communication between switch and controller isn't established.
     memset(inBuf, 0,MAX_BUFF);
-    while(read(fd[CONT_FD][0], inBuf, MAX_BUFF)<0) {
-
-    }
+    while(read(fd[CONT_FD][0], inBuf, MAX_BUFF)<0) {}
     cout << "I read" << endl;
     cout << inBuf << endl;
     string trafLine;
+
     while(1){
         //read line from traffic file
         if (trafficFile.is_open()) {
@@ -551,6 +591,8 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
                 vector<string> trafTokens = tokenize(trafLine);
 
                 if (trafTokens.size() > 0 && trafTokens[0] == (string)"sw"+to_string(swi)){
+                    //admit "packet"
+                    pStat.rAdmit++;
                     cout<<"FOUND A Traffic line FOR ME"<<endl;
 
                     findFlowRule(stoi(trafTokens[1]),stoi(trafTokens[2]),swi,swj,swk,fd,flowTable,todoList);
@@ -558,6 +600,46 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
             }
         }
         //poll keyboard
+
+        int rvalKeyboard=poll(keyboardFd,3,timeout);
+        if (rvalKeyboard < 0){
+            perror("Error in polling in controller");
+            exit(EXIT_FAILURE);
+        }
+        else if (rvalKeyboard == 0 ); //Do Nothing
+        else{
+            //BUG: Sometimes keyboard input doesnt work for whatever reason. find out reason why.
+            //check if keyboard has pollin. For some reason poll pri is being introduced
+            if(keyboardFd[0].revents & POLLIN){
+                memset(inBuf, 0, MAX_BUFF);
+                inLen = read(0,inBuf,MAX_BUFF);
+
+                string output = (string) inBuf;
+
+                if (output == (string)"list\n"){
+                    //print flow table
+                    cout<<"Flow table:"<<endl;
+                    for(int i=0; i<flowTable.size();i++){
+                        printf("[%i] (srcIp= %i-%i, destIP=%i-%i action=%i, pri= %i, pktCount= %i)\n",i,flowTable[i].srcIpLo,
+                                flowTable[i].srcIpHi,flowTable[i].destIpLo,flowTable[i].destIpHi,
+                                flowTable[i].actionType,flowTable[i].pri,flowTable[i].pktCount);
+                    }
+                    //print packet stats
+                    cout<<"Packet Stats:"<<endl;
+                    printf("Recieved:      ADMIT:%i, ACK:%i, ADDRULE:%i, RELAYIN:%i\n",pStat.rAdmit,pStat.rAck,pStat.rAdd,pStat.rRelay);
+                    printf("Transmitted:   OPEN:%i, QUERY:%i, RELAYOUT:%i\n",pStat.tOpen,pStat.tQuery,pStat.tRelay);
+                }
+                else if (output == (string)"exit\n"){
+                    cout<<"Exiting..."<<endl;
+                    exit(0);
+                }
+                else{
+                    cout<<"Unknown input command."<<endl;
+                }
+                cout<<output<<endl;
+            }
+        }
+
 
         //poll switch
 
@@ -579,16 +661,18 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
                     switch(stoi(tokens[0])){
                         case ACK:
                             cout<<"Got ACK"<<endl;
+                            pStat.rAck++;
                             break;
 
                         case RELAY:
                             cout<<"Got RELAY"<<endl;
+                            pStat.rRelay++;
                             findFlowRule(stoi(tokens[1]),stoi(tokens[2]),swi,swj,swk,fd,flowTable,todoList);
                             break;
 
                         case ADD:
                             cout<<"Got ADD"<<endl;
-
+                            pStat.rAdd++;
                             handleAdd(tokens,flowTable,todoList,swi,swj,swk,fd);
                             break;
 
@@ -599,7 +683,7 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
         }
     }
 }
-
+//BUG: Sometime switch can get duplicate rules.
 
 int main(int argc, char* argv[]){
     rlimit rlim;

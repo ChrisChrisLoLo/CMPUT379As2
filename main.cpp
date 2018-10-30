@@ -36,10 +36,8 @@
 #define CONT_FD 0
 #define SWJ_FD 1
 #define SWK_FD 2
-#define TRAF_FD 3
 
 #define MIN_PRI 4
-#define MAX_RULES 100
 
 #define MAX_BUFF 80
 
@@ -66,7 +64,8 @@ struct traf_t{
     int ipDst;
 };
 
-//Struct used to define the given stats of a controller
+//Struct used to define the given stats of a controller or switch.
+//Keeps track of all packets sent and recieved.
 struct packStat_t{
     int rOpen=0;
     int rQuery=0;
@@ -90,9 +89,14 @@ struct switch_t{
     int ipHigh;
 };
 
+using namespace std;
+
+//Initialize the packet statistics as a global.
 packStat_t pStat;
 
-using namespace std;
+//Initialize the traffic file as a global.
+ifstream trafficFile;
+
 
 //Checks if number, taken from:
 //https://stackoverflow.com/questions/4654636/how-to-determine-if-a-string-is-a-number-with-c
@@ -110,7 +114,6 @@ vector<string> tokenize(string input){
     return results;
 }
 
-ifstream trafficFile;
 
 //Print a message and exit. makes code in main() a bit cleaner.
 void pExit(string e){
@@ -206,7 +209,7 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
                             +to_string(DROP)+" "+"0"+" "+to_string(MIN_PRI)+" "+"0";
         fdPrint(fd[sourceSw-1][1],buf,dropPacket);
         pStat.tAdd++;
-        cout<<"PRINTED"<<endl;
+//        cout<<"PRINTED"<<endl;
     }
 }
 
@@ -263,7 +266,7 @@ void progController(int nSwitch) {
             perror("Error in opening readFIFO");
             exit(EXIT_FAILURE);
         } else {
-            cout << "opened fifo-" + to_string(i) + "-0" << endl;
+            //cout << "opened fifo-" + to_string(i) + "-0" << endl;
             fd[i - 1][0] = fileDescRead;
             pollfd[i - 1].fd = fileDescRead;
             pollfd[i - 1].events = POLLIN;
@@ -619,8 +622,7 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
     //communication between switch and controller isn't established.
     memset(inBuf, 0,MAX_BUFF);
     while(read(fd[CONT_FD][0], inBuf, MAX_BUFF)<0) {}
-    cout << "I read" << endl;
-    cout << inBuf << endl;
+
     string trafLine;
 
     while(1){
@@ -632,8 +634,6 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
                 if (trafTokens.size() > 0 && trafTokens[0] == (string)"sw"+to_string(swi)){
                     //admit "packet"
                     pStat.rAdmit++;
-                    cout<<"FOUND A Traffic line FOR ME"<<endl;
-
                     findFlowRule(stoi(trafTokens[1]),stoi(trafTokens[2]),swi,swj,swk,fd,flowTable,todoList);
                 }
             }
@@ -695,22 +695,21 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
                     inLen = read(fd[i][0],inBuf,MAX_BUFF);
 
                     string output = (string) inBuf;
-                    cout<<output<<endl;
                     vector<string>tokens = tokenize(output);
                     switch(stoi(tokens[0])){
                         case ACK:
-                            cout<<"Got ACK"<<endl;
+                            //cout<<"Got ACK"<<endl;
                             pStat.rAck++;
                             break;
 
                         case RELAY:
-                            cout<<"Got RELAY"<<endl;
+                            //cout<<"Got RELAY"<<endl;
                             pStat.rRelay++;
                             findFlowRule(stoi(tokens[1]),stoi(tokens[2]),swi,swj,swk,fd,flowTable,todoList);
                             break;
 
                         case ADD:
-                            cout<<"Got ADD"<<endl;
+                            //cout<<"Got ADD"<<endl;
                             pStat.rAdd++;
                             handleAdd(tokens,flowTable,todoList,swi,swj,swk,fd);
                             break;
@@ -722,7 +721,6 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
         }
     }
 }
-//BUG: Sometime switch can get duplicate rules.
 
 //Main function. Handles all arguments and either executes progSwitch() or progCont(),
 //depending on what is requested of it.
@@ -757,7 +755,8 @@ int main(int argc, char* argv[]){
             if(nSwitchInt > MAX_NSW){
                 pExit("Error: number of switches exceeded the maximum amount");
             }
-            cout<< nSwitchInt;
+
+            //Execute software defined controller.
             progController(nSwitchInt);
             exit(0);
         }
@@ -766,16 +765,14 @@ int main(int argc, char* argv[]){
         char swiNum = argv[1][2];
         int swi = (int) swiNum-48;
         string trafficFileName = (string)argv[2];
-        //open traffic file if it screws up raise error and exit.
+        //test if traffic file is legitimate.
         trafficFile.open(trafficFileName);
-        cout<<trafficFileName<<endl;
         if(!trafficFile.is_open()){
             pExit("Error: Traffic file cannot open");
         }
         char * swjIn = argv[3];
         char * swkIn = argv[4];
         int swj,swk;
-        //TODO:CHECK THAT SWK AND SWJ ARE NUMS
 
         if (swjIn==string("null")){
             swj = -1;
@@ -814,13 +811,11 @@ int main(int argc, char* argv[]){
             pExit("Error: ip range given exceeds the permitted ip range");
         }
 
-        cout<<ipLow<<"-"<<ipHigh<<endl;
 
         //Execute software defined switch
         progSwitch(swi,swj,swk,ipLow,ipHigh);
     }
     else {
-        cout<<argv[1];
         pExit("Error: first argument is not 'cont' nor 'swi'");
     }
 

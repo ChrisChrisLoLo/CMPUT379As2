@@ -47,6 +47,7 @@
 #define SEND_LEFT 1
 #define SEND_RIGHT 2
 
+//Struct to define a given flow rule.
 struct flow_rule{
     int srcIpLo;
     int srcIpHi;
@@ -58,12 +59,14 @@ struct flow_rule{
     int pktCount;
 };
 
+//Struct used to define a given traffic rule
 struct traf_t{
     int swi;
     int ipSrc;
     int ipDst;
 };
 
+//Struct used to define the given stats of a controller
 struct packStat_t{
     int rOpen=0;
     int rQuery=0;
@@ -76,6 +79,15 @@ struct packStat_t{
     int tOpen=0;
     int tQuery=0;
     int tRelay=0;
+};
+
+//Struct to define ports and number pertaining to a switch
+struct switch_t{
+    int swi;
+    int swj;
+    int swk;
+    int ipLow;
+    int ipHigh;
 };
 
 packStat_t pStat;
@@ -100,29 +112,22 @@ vector<string> tokenize(string input){
 
 ifstream trafficFile;
 
-
+//Print a message and exit. makes code in main() a bit cleaner.
 void pExit(string e){
     cout<<e<<endl;
     exit(1);
 }
 
+//Print to a given file descriptor.
 void fdPrint(int fd,char* buf,string message){
     memset(buf, 0, sizeof(buf));
-    // Need to close? close(fd[CONT_FD][0]);
     const char * cString = message.c_str();
     sprintf(buf,cString);
     write(fd,buf, MAX_BUFF);
 }
-struct switch_t{
-    int swi;
-    int swj;
-    int swk;
-    int ipLow;
-    int ipHigh;
-};
 
-
-
+//Used by the controller to handle a query signal. takes in the packets contents, the fd's the controller has,
+//as well as the array of switches that is in contact with the controller.
 void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
     int sourceSw = stoi(tokens[1]);
     int srcIp = stoi(tokens[2]);
@@ -133,16 +138,10 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
     bool switchFound=false;
     for(int i=0;i<swArr.size();i++){
         if(dstIp>=swArr[i].ipLow && dstIp<=swArr[i].ipHigh){
-            //ip destination matches current switch
-            //fd[swArr[i].swi-1][1];
             if (sourceSw < swArr[i].swi) {
-                //send rule to current switch
-
-                //srcIP_lo, srcIP_hi, destIP_low, destIP_high, forward, actionVal , pri, pketcount
+                //Tell to send packet right
                 string forwardRightPacket = (string) to_string(ADD)+" "+"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
                                             +to_string(SEND)+" "+to_string(SEND_RIGHT)+" "+to_string(MIN_PRI)+" "+"0";
-
-
                 bool canTravel = true;
                 //double check that there are intermediary switches that can carry the package
                 for(int j = sourceSw;j<swArr[i].swi;j++){
@@ -159,19 +158,17 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
                 if(!canTravel){
                     continue;
                 }
-
-
                 //send to all switches in range [sourceSwitch,destinationSwitch);
                 for(int j = sourceSw;j<swArr[i].swi;j++){
                     fdPrint(fd[j-1][1],buf,forwardRightPacket);
+                    pStat.tAdd++;
                 }
                 switchFound = true;
             }
             else if (sourceSw > swArr[i].swi){
+                //Give command to send packet left
                 string forwardLeftPacket = (string) to_string(ADD)+" "+"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
                                            +to_string(SEND)+" "+to_string(SEND_LEFT)+" "+to_string(MIN_PRI)+" "+"0";
-
-
                 bool canTravel = true;
                 //double check that there are intermediary switches that can carry the package
                 for(int j = sourceSw;j>swArr[i].swi;j--){
@@ -190,11 +187,14 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
                 if(!canTravel){
                     continue;
                 }
-
-                //send to all switches in range [sourceSwitch,destinationSwitch);
-
+                //Send to all switches in range [sourceSwitch,destinationSwitch).
+                //This is to handle the case where the packet must travel multiple times.
+                //ie. from switch 1 to switch 7
+                //It would not be wise to only tell the current switch to send the packet left
+                //fully knowing well that we need to repeat this process n-2 times.
                 for(int j = sourceSw; j>swArr[i].swi;j--){
                     fdPrint(fd[j-1][1],buf,forwardLeftPacket);
+                    pStat.tAdd++;
                 }
                 switchFound = true;
             }
@@ -205,12 +205,13 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
         string dropPacket =  to_string(ADD)+" "+"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
                             +to_string(DROP)+" "+"0"+" "+to_string(MIN_PRI)+" "+"0";
         fdPrint(fd[sourceSw-1][1],buf,dropPacket);
+        pStat.tAdd++;
         cout<<"PRINTED"<<endl;
     }
 }
 
 
-
+//Handle the open signal has the controller.
 void handleOpen(vector<string> tokens,int fd[][2],vector<switch_t> &swArr){
     switch_t switchIn;
     switchIn.swi = stoi(tokens[1]);
@@ -219,7 +220,7 @@ void handleOpen(vector<string> tokens,int fd[][2],vector<switch_t> &swArr){
     switchIn.ipLow = stoi(tokens[4]);
     switchIn.ipHigh = stoi(tokens[5]);
 
-    //add switch to array.
+    //add switch to the list of switches.
     swArr.push_back({stoi(tokens[1]),stoi(tokens[2]),stoi(tokens[3]),stoi(tokens[4]),stoi(tokens[5])});
 
     string fifoDirWrite = "./fifo-0-"+to_string(switchIn.swi);
@@ -232,15 +233,17 @@ void handleOpen(vector<string> tokens,int fd[][2],vector<switch_t> &swArr){
     else {
         fd[switchIn.swi-1][1] = fileDescWrite;
     }
-    string ackPacket = to_string(ACK);
 
+    //send acknowledgement packet to switch
+    string ackPacket = to_string(ACK);
+    pStat.tAck++;
     char outBuf[MAX_BUFF];
     fdPrint(fd[switchIn.swi-1][1],outBuf,ackPacket);
 
 }
 
-
-//Many concepts used from poll.c file created by E. Elmallah found in the examples in eclass.
+//The setup and loop of the controller code is found here.
+//Many concepts used from poll.c file created by E. Elmallah, which was found in the examples in eclass.
 void progController(int nSwitch) {
     int timeout = 0;
     int fd[nSwitch][2];
@@ -248,14 +251,12 @@ void progController(int nSwitch) {
     int done[nSwitch];
     //Open pipes from switches 1-n
 
-
-
     for (int i = 1; i < nSwitch + 1; i++) {
         string fifoDirWrite = "./fifo-0-" + to_string(i);
         string fifoDirRead = "./fifo-" + to_string(i) + "-0";
 
         //Make readfifo and open it store it in fd[][0].
-        if (mkfifo(fifoDirRead.c_str(), (mode_t) 0777) < 0)perror(strerror(errno));
+        mkfifo(fifoDirRead.c_str(), (mode_t) 0777);
 
         int fileDescRead = open(fifoDirRead.c_str(), O_RDONLY | O_NONBLOCK);
         if (fileDescRead < 0) {
@@ -270,21 +271,67 @@ void progController(int nSwitch) {
         }
 
         done[i] = 0;
-        //Make writefifo and open it store it in fd[][1].
     }
 
     //Controller loop
     char buf[MAX_BUFF];
     int inLen;
     vector<switch_t> switchArr;
+
+    //Initialize a file descriptor for standard input
+    struct pollfd keyboardFd[1];
+    keyboardFd[0].fd = STDOUT_FILENO;
+    keyboardFd[1].events=POLLIN;
+    keyboardFd[2].revents=0;
+    char outBuf[MAX_BUFF];
+    char inBuf[MAX_BUFF];
     while (1) {
+
+        //poll the  keyboard
+        int rvalKeyboard=poll(keyboardFd,3,timeout);
+        if (rvalKeyboard < 0){
+            perror("Error in polling in controller");
+            exit(EXIT_FAILURE);
+        }
+        else if (rvalKeyboard == 0 ); //Do Nothing
+        else{
+            //BUG: Sometimes keyboard input doesnt work for whatever reason. find out reason why.
+            //check if keyboard has pollin. For some reason poll pri is being introduced
+            if(keyboardFd[0].revents & POLLIN){
+                memset(inBuf, 0, MAX_BUFF);
+                inLen = read(0,inBuf,MAX_BUFF);
+
+                string output = (string) inBuf;
+
+                if (output == (string)"list\n"){
+                    //print switch information
+                    cout<<"Switch information:"<<endl;
+                    for(int i=0;i<switchArr.size();i++){
+                        switch_t sw = switchArr[i];
+                        printf("[%i] port1=%i port2=%i port3=%i-%i\n\n",sw.swi,sw.swj,sw.swk,sw.ipLow,sw.ipHigh);
+                    }
+                    //print packet stats
+                    cout<<"Packet Stats:"<<endl;
+                    printf("Recieved:      ADMIT:%i, ACK:%i, ADDRULE:%i, RELAYIN:%i\n",pStat.rAdmit,pStat.rAck,pStat.rAdd,pStat.rRelay);
+                    printf("Transmitted:   OPEN:%i, QUERY:%i, RELAYOUT:%i\n",pStat.tOpen,pStat.tQuery,pStat.tRelay);
+                }
+                else if (output == (string)"exit\n"){
+                    cout<<"Exiting..."<<endl;
+                    exit(0);
+                }
+                else{
+                    cout<<"Unknown input command."<<endl;
+                }
+                cout<<output<<endl;
+            }
+        }
+        //poll the switches
         int rval = poll(pollfd, nSwitch, timeout);
         if (rval < 0) {
             perror("Error in polling in controller");
             exit(EXIT_FAILURE);
         } else if (rval == 0); //Do Nothing
         else {
-            //cout<<rval<<endl;
             for (int i = 0; i < nSwitch; i++) {
                 if (pollfd[i].revents & POLLIN) {
                     memset(buf, 0, MAX_BUFF);
@@ -311,6 +358,9 @@ void progController(int nSwitch) {
     }
 
 }
+
+//Attempts to find a rule that works for a packet that the switch as recieved. If no rule is found, send a Query packet
+//to the controller.
 void findFlowRule(int initTrafIp, int dstTrafIp, int swi, int swj, int swk, int fd[][2], vector<flow_rule> &flowTable, vector<traf_t> &todoList ) {
     bool resolved = false;
     flow_rule foundRule = {0};
@@ -327,11 +377,10 @@ void findFlowRule(int initTrafIp, int dstTrafIp, int swi, int swj, int swk, int 
             }
         }
     }
-    //if no rule
+    //if no rule has been found.
     if (!resolved) {
         //ask controller for help. query the traffic in a vector
         cout << "Ask controller for help" << endl;
-
         string queryPacket =
                 to_string(QUERY) + " " + to_string(swi) + " " + to_string(initTrafIp) + " " + to_string(dstTrafIp);
         fdPrint(fd[CONT_FD][1], buf, queryPacket);
@@ -346,15 +395,15 @@ void findFlowRule(int initTrafIp, int dstTrafIp, int swi, int swj, int swk, int 
         switch (foundRule.actionType) {
             case FORWARD:
                 //Deliver the package
-                cout << "DELIVERED" << endl;
                 break;
 
             case DROP:
-                cout << "DROPPED" << endl;
+                //Drop the package
                 break;
 
             case SEND:
-
+                //Send the package to another switch
+                //Set up a fifo with the recipient switch if not yet done.
                 string destSwitch = (foundRule.actionVal == SEND_LEFT)?to_string(swj):to_string(swk);
                 string fifoDirWrite = "./fifo-"+to_string(swi)+"-"+destSwitch;
                 int fileDescWrite = open(fifoDirWrite.c_str(),O_WRONLY|O_NONBLOCK);
@@ -377,25 +426,16 @@ void findFlowRule(int initTrafIp, int dstTrafIp, int swi, int swj, int swk, int 
         }
     }
 }
-//ADD, srcIP_lo, srcIP_hi, destIP_low, destIP_high, actionType, actionVal , pri, pketcount
+
+//Handles the add signal as the switch.
 //NOTE: It is possible for there to be more ADD packets than rules when listing. THis is becuase not all ADDS result in a new rule.
+
 void handleAdd(vector<string> tokens, vector<flow_rule> &flowTable, vector<traf_t> &todoList,int swi,int swj, int swk,int fd[][2]){
     //create new rule from the cont message and add it to the flow table
-
-//    struct flow_rule{
-//        int srcIpLo;
-//        int srcIpHi;
-//        int destIpLo;
-//        int destIpHi;
-//        int actionType;
-//        int actionVal;
-//        int pri;
-//        int pktCount;
-//    };
     flow_rule newRule ={stoi(tokens[1]),stoi(tokens[2]),stoi(tokens[3]),
                         stoi(tokens[4]),stoi(tokens[5]),stoi(tokens[6]),stoi(tokens[7]),0};
 
-    //Some times a switch can ask for the same rule multiple times, as it does not wait to recieve a rule.
+    //Sometimes a switch can ask for the same rule multiple times, since it does not wait to receive a rule.
     //To prevent this, check if the rule we have just added
     bool duplicateRule = false;
     for(int i=0;i<flowTable.size();i++){
@@ -411,7 +451,7 @@ void handleAdd(vector<string> tokens, vector<flow_rule> &flowTable, vector<traf_
         flowTable.push_back(newRule);
     }
 
-    //now that new rule is added, go through all todoTraffic in the traffic list.
+    //now that the new rule is added, go through all todoTraffic in the traffic list.
     //Mark any traffic resolved as true, and add them to a list to remove from.
     vector<bool> trafResolved;
 
@@ -428,14 +468,13 @@ void handleAdd(vector<string> tokens, vector<flow_rule> &flowTable, vector<traf_
                     switch (foundRule.actionType){
 
                         case FORWARD:
-                            cout << "New Rule tells DELIVERED" <<endl;
+                            //Forward the package
                             break;
-
                         case DROP:
-                            cout << "New Rule tells DROPPED" << endl;
+                            //Drop the package
                             break;
-
                         case SEND:
+                            //Send the package to a switch
                             char buf[MAX_BUFF];
                             string destSwitch = (foundRule.actionVal == SEND_LEFT)?to_string(swj):to_string(swk);
                             string fifoDirWrite = "./fifo-"+to_string(swi)+"-"+destSwitch;
@@ -472,29 +511,29 @@ void handleAdd(vector<string> tokens, vector<flow_rule> &flowTable, vector<traf_
 
 }
 
+//Code that is used in the setup and loop of the virtual switch.
 void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
     int timeout = 0;
     int fd[4][2];
     struct pollfd pollfd[3];
-    //cout<<endl<<swi<<endl<<swj<<endl<<swk<<endl<<ipLow<<ipHigh<<endl;
     string fifoDirWrite = "./fifo-"+to_string(swi)+"-0";
     string fifoDirRead = "./fifo-0-"+to_string(swi);
 
 
     //Open controller FIFO
-    if (mkfifo(fifoDirRead.c_str(),(mode_t) 0777) < 0)perror(strerror(errno));
+    mkfifo(fifoDirRead.c_str(),(mode_t) 0777);
     int fileDescRead = open(fifoDirRead.c_str(),O_RDONLY|O_NONBLOCK);
     if (fileDescRead<0){
         perror("Error in opening controller readFIFO");
         exit(EXIT_FAILURE);
     }
     else{
+        //add the controller to the pollfd list and fd list
         fd[CONT_FD][0] = fileDescRead;
         pollfd[CONT_FD].fd = fileDescRead;
         pollfd[CONT_FD].events = POLLIN;
         pollfd[CONT_FD].revents = 0;
     }
-    \
     int fileDescWrite = open(fifoDirWrite.c_str(),O_WRONLY|O_NONBLOCK);
 
     if (fileDescWrite<0){
@@ -511,7 +550,7 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
     if(swj != -1){
         string fifoSwjWrite = "./fifo-"+to_string(swi)+"-"+to_string(swj);
         string fifoSwjRead = "./fifo-"+to_string(swj)+"-"+to_string(swi);
-        if (mkfifo(fifoSwjRead.c_str(),(mode_t) 0777) < 0)perror(strerror(errno));
+        if (fifoSwjRead.c_str(),(mode_t) 0777);
         int fileSwjRead = open(fifoSwjRead.c_str(),O_RDONLY|O_NONBLOCK);
         if (fileSwjRead<0){
             perror("Error in opening swj readFIFO");
@@ -527,7 +566,7 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
     if(swk != -1){
         string fifoSwkWrite = "./fifo-"+to_string(swi)+"-"+to_string(swk);
         string fifoSwkRead = "./fifo-"+to_string(swk)+"-"+to_string(swi);
-        if (mkfifo(fifoSwkRead.c_str(),(mode_t) 0777) < 0)perror(strerror(errno));
+        mkfifo(fifoSwkRead.c_str(),(mode_t) 0777);
         int fileSwkRead = open(fifoSwkRead.c_str(),O_RDONLY|O_NONBLOCK);
         if (fileSwkRead<0){
             perror("Error in opening swk readFIFO");
@@ -617,14 +656,14 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
                 string output = (string) inBuf;
 
                 if (output == (string)"list\n"){
-                    //print flow table
+                    //print the flow table
                     cout<<"Flow table:"<<endl;
                     for(int i=0; i<flowTable.size();i++){
                         printf("[%i] (srcIp= %i-%i, destIP=%i-%i action=%i, pri= %i, pktCount= %i)\n",i,flowTable[i].srcIpLo,
                                 flowTable[i].srcIpHi,flowTable[i].destIpLo,flowTable[i].destIpHi,
                                 flowTable[i].actionType,flowTable[i].pri,flowTable[i].pktCount);
                     }
-                    //print packet stats
+                    //print the packet stats
                     cout<<"Packet Stats:"<<endl;
                     printf("Recieved:      ADMIT:%i, ACK:%i, ADDRULE:%i, RELAYIN:%i\n",pStat.rAdmit,pStat.rAck,pStat.rAdd,pStat.rRelay);
                     printf("Transmitted:   OPEN:%i, QUERY:%i, RELAYOUT:%i\n",pStat.tOpen,pStat.tQuery,pStat.tRelay);
@@ -685,6 +724,8 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
 }
 //BUG: Sometime switch can get duplicate rules.
 
+//Main function. Handles all arguments and either executes progSwitch() or progCont(),
+//depending on what is requested of it.
 int main(int argc, char* argv[]){
     rlimit rlim;
     if (getrlimit(RLIMIT_CPU, &rlim) == -1){
@@ -697,8 +738,6 @@ int main(int argc, char* argv[]){
         cout<<"Error:Rlimit set failed"<<endl;
         cout<<strerror(errno)<<endl;
     }
-
-
     if (argc < 1){
         pExit("Error: No parameters specified");
     }
@@ -719,7 +758,6 @@ int main(int argc, char* argv[]){
                 pExit("Error: number of switches exceeded the maximum amount");
             }
             cout<< nSwitchInt;
-            cout<<"!!EXECUTING CONTROLLER PROG!!"<<endl;
             progController(nSwitchInt);
             exit(0);
         }
@@ -738,25 +776,27 @@ int main(int argc, char* argv[]){
         char * swkIn = argv[4];
         int swj,swk;
         //TODO:CHECK THAT SWK AND SWJ ARE NUMS
-//        if (is_number((string)swjIn[2])){
-//            swj = atoi(swjIn[2]);
-//        }
 
-        //if (swjIn==(char*)"null"){
         if (swjIn==string("null")){
             swj = -1;
         }
-        else{
+        else if(isdigit(swjIn[2])){
             swj = (int) swjIn[2]-'0';
-//            pExit("Error: swj is invalid");
+
+        }
+        else{
+            pExit("Error: swj is invalid");
         }
 
         if (swkIn==string("null")){
             swk = -1;
         }
-        else{
+        else if(isdigit(swkIn[2])){
             swk = swkIn[2]-'0';
-//            pExit("Error: swk is invalid");
+
+        }
+        else{
+            pExit("Error: swk is invalid");
         }
         string ipRange = (string)argv[5];
         //https://stackoverflow.com/questions/28163723/c-how-to-get-substring-after-a-character
@@ -776,6 +816,7 @@ int main(int argc, char* argv[]){
 
         cout<<ipLow<<"-"<<ipHigh<<endl;
 
+        //Execute software defined switch
         progSwitch(swi,swj,swk,ipLow,ipHigh);
     }
     else {
@@ -783,11 +824,5 @@ int main(int argc, char* argv[]){
         pExit("Error: first argument is not 'cont' nor 'swi'");
     }
 
-
-    string targetPidIn = "";
-    string intervalIn = "";
-
-    if (argv[1]) targetPidIn = (string)argv[1];
-    if (argv[2]) intervalIn = (string)argv[2];
 }
 

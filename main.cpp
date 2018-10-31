@@ -176,12 +176,17 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
                     continue;
                 }
                 //send to all switches in range [sourceSwitch,destinationSwitch);
-                for(int j = sourceSw;j<swArr[i].swi;j++){
-                    fdPrint(fd[j-1][1],buf,forwardRightPacket);
-                    printf("Transmitted (src= cont, dest= sw%i)[ADD]\n",j);
-                    printf("(srcIP= 0-1000, destIP= %i-%i, action= %s:%i, pri=%i, pktCount=0)\n",dstIp,dstIp,flowPairs[SEND].c_str(),SEND,MIN_PRI);
-                    pStat.tAdd++;
-                }
+//                for(int j = sourceSw;j<swArr[i].swi;j++) {
+//                    fdPrint(fd[j - 1][1], buf, forwardRightPacket);
+//                    printf("Transmitted (src= cont, dest= sw%i)[ADD]\n", j);
+//                    printf("(srcIP= 0-1000, destIP= %i-%i, action= %s:%i, pri=%i, pktCount=0)\n", dstIp, dstIp,
+//                           flowPairs[SEND].c_str(), SEND, MIN_PRI);
+//                    pStat.tAdd++;
+//                }
+                fdPrint(fd[sourceSw-1][1],buf,forwardRightPacket);
+                printf("Transmitted (src= cont, dest= sw%i)[ADD]\n",sourceSw);
+                printf("(srcIP= 0-1000, destIP= %i-%i, action= %s:%i, pri=%i, pktCount=0)\n",dstIp,dstIp,flowPairs[SEND].c_str(),SEND,MIN_PRI);
+                pStat.tAdd++;
                 switchFound = true;
             }
             else if (sourceSw > swArr[i].swi){
@@ -211,12 +216,15 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
                 //ie. from switch 1 to switch 7
                 //It would not be wise to only tell the current switch to send the packet left
                 //fully knowing well that we need to repeat this process n-2 times.
-                for(int j = sourceSw; j>swArr[i].swi;j--){
-                    fdPrint(fd[j-1][1],buf,forwardLeftPacket);
-                    printf("Transmitted (src= cont, dest= sw%i)[ADD]\n",j);
-                    printf("(srcIP= 0-1000, destIP= %i-%i, action= %s:%i, pri=%i, pktCount=0)\n",dstIp,dstIp,flowPairs[SEND].c_str(),SEND,MIN_PRI);
-                    pStat.tAdd++;
-                }
+//                for(int j = sourceSw; j>swArr[i].swi;j--){
+//                    fdPrint(fd[j-1][1],buf,forwardLeftPacket);
+//                    printf("Transmitted (src= cont, dest= sw%i)[ADD]\n",j);
+//                    printf("(srcIP= 0-1000, destIP= %i-%i, action= %s:%i, pri=%i, pktCount=0)\n",dstIp,dstIp,flowPairs[SEND].c_str(),SEND,MIN_PRI);
+//                    pStat.tAdd++;
+//                }
+                pStat.tAdd++;
+                fdPrint(fd[sourceSw-1][1],buf,forwardLeftPacket);
+                printf("Transmitted (src= cont, dest= sw%i)[ADD]\n",sourceSw);
                 switchFound = true;
             }
         }
@@ -552,6 +560,7 @@ void handleAdd(vector<string> tokens, vector<flow_rule> &flowTable, vector<traf_
                                 fdPrint(fd[SWK_FD][1], buf, relayPacket);
                                 dstSwitchNum=swk;
                             }
+                            pStat.tRelay++;
                             printf("Transmitted (src= sw%i, dest= sw%i) [RELAY]:  header= (srcIP= %i, destIP= %i)\n",
                                    swi,dstSwitchNum,todoList[i].ipSrc,todoList[i].ipDst);
                             break;

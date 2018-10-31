@@ -387,6 +387,8 @@ void progController(int nSwitch) {
 
 }
 
+vector<string> queriedPackets;
+
 //Attempts to find a rule that works for a packet that the switch as recieved. If no rule is found, send a Query packet
 //to the controller.
 void findFlowRule(int initTrafIp, int dstTrafIp, int swi, int swj, int swk, int fd[][2], vector<flow_rule> &flowTable, vector<traf_t> &todoList ) {
@@ -405,12 +407,15 @@ void findFlowRule(int initTrafIp, int dstTrafIp, int swi, int swj, int swk, int 
             }
         }
     }
+
+
     //if no rule has been found.
     if (!resolved) {
-        //ask controller for help. query the traffic in a vector
-        cout << "Ask controller for help" << endl;
         string queryPacket =
                 to_string(QUERY) + " " + to_string(swi) + " " + to_string(initTrafIp) + " " + to_string(dstTrafIp);
+        //ask controller for help. query the traffic in a vector
+        printf("Transmitted (src= %i, dest= cont) [QUERY]:  header= (srcIP= %i, destIP= %i)\n",swi,initTrafIp,dstTrafIp);
+
         fdPrint(fd[CONT_FD][1], buf, queryPacket);
         pStat.tQuery++;
         traf_t todoTraf;
@@ -443,13 +448,18 @@ void findFlowRule(int initTrafIp, int dstTrafIp, int swi, int swj, int swk, int 
 
 
                 string relayPacket = to_string(RELAY)+" "+to_string(initTrafIp)+" "+to_string(dstTrafIp);
+                int dstSwitchNum;
                 if (foundRule.actionVal == SEND_LEFT){
                     fdPrint(fd[SWJ_FD][1], buf, relayPacket);
+                    dstSwitchNum=swj;
                 }
                 else if (foundRule.actionVal == SEND_RIGHT){
                     fdPrint(fd[SWK_FD][1], buf, relayPacket);
+                    dstSwitchNum=swk;
                 }
                 pStat.tRelay++;
+                printf("Transmitted (src= sw%i, dest= sw%i) [RELAY]:  header= (srcIP= %i, destIP= %i)\n",
+                        swi,dstSwitchNum,initTrafIp,dstTrafIp);
                 break;
         }
     }
@@ -462,9 +472,12 @@ void handleAdd(vector<string> tokens, vector<flow_rule> &flowTable, vector<traf_
     //create new rule from the cont message and add it to the flow table
     flow_rule newRule ={stoi(tokens[1]),stoi(tokens[2]),stoi(tokens[3]),
                         stoi(tokens[4]),stoi(tokens[5]),stoi(tokens[6]),stoi(tokens[7]),0};
-
+    printf("Received (src= cont, dest= sw%i) [ADD]:\n",swi);
+    printf("(srcIP= %i-%i, destIP= %i-%i, action= %s:%i, pri= %i, pktCount= %i)\n",
+            newRule.srcIpLo,newRule.srcIpHi,newRule.destIpLo,newRule.destIpHi,
+            flowPairs[newRule.actionType].c_str(),newRule.actionType,newRule.pri,newRule.pktCount);
     //Sometimes a switch can ask for the same rule multiple times, since it does not wait to receive a rule.
-    //To prevent this, check if the rule we have just added
+    //To prevent this, check if the rule we have was just added
     bool duplicateRule = false;
     for(int i=0;i<flowTable.size();i++){
         if (newRule.srcIpHi==flowTable[i].srcIpHi&&
@@ -516,12 +529,17 @@ void handleAdd(vector<string> tokens, vector<flow_rule> &flowTable, vector<traf_
 
 
                             string relayPacket = to_string(RELAY)+" "+to_string(todoList[i].ipSrc)+" "+to_string(todoList[i].ipDst);
+                            int dstSwitchNum;
                             if (foundRule.actionVal == SEND_LEFT){
                                 fdPrint(fd[SWJ_FD][1], buf, relayPacket);
+                                dstSwitchNum=swj;
                             }
                             else if (foundRule.actionVal == SEND_RIGHT){
                                 fdPrint(fd[SWK_FD][1], buf, relayPacket);
+                                dstSwitchNum=swk;
                             }
+                            printf("Transmitted (src= sw%i, dest= sw%i) [RELAY]:  header= (srcIP= %i, destIP= %i)\n",
+                                   swi,dstSwitchNum,todoList[i].ipSrc,todoList[i].ipDst);
                             break;
                     }
                     break;
@@ -640,6 +658,8 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
             +to_string(swj)+" "+to_string(swk)+" "
             +to_string(ipLow)+" "+to_string(ipHigh) ;
     fdPrint(fd[CONT_FD][1],outBuf,openPacket);
+    printf("Transmitted (src= sw%i, dest= cont) [OPEN]:\n",swi);
+    printf("(port0= cont, port1= %i, port2= %i, port3= %i-%i)\n",swj,swk,ipLow,ipHigh);
     pStat.tOpen++;
 
     //Block switch until it has recieved awknowledgement. We need to do this for sync purposes.
@@ -647,6 +667,8 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
     //communication between switch and controller isn't established.
     memset(inBuf, 0,MAX_BUFF);
     while(read(fd[CONT_FD][0], inBuf, MAX_BUFF)<0) {}
+    pStat.rAck++;
+    printf("Received (src= cont, dest= sw%i) [ACK]\n",swi);
 
     string trafLine;
 
@@ -722,15 +744,14 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
                     vector<string>tokens = tokenize(output);
                     switch(stoi(tokens[0])){
                         case ACK:
-                            //cout<<"Got ACK"<<endl;
-                            pStat.rAck++;
-                            printf("Received (src= cont, dest= sw%i) [ACK]\n",swi);
+                            //Ack package already recieved.
                             break;
 
                         case RELAY:
                             //cout<<"Got RELAY"<<endl;
                             pStat.rRelay++;
-                            printf("Received (src= sw%i, dest= sw%i) [RELAY]:  header= (srcIP= %i, destIP= %i)",sendingSwitch,swi,stoi(tokens[1]),stoi(tokens[2]));
+                            printf("Received (src= sw%i, dest= sw%i) [RELAY]:  header= (srcIP= %i, destIP= %i)\n",
+                                    sendingSwitch,swi,stoi(tokens[1]),stoi(tokens[2]));
                             findFlowRule(stoi(tokens[1]),stoi(tokens[2]),swi,swj,swk,fd,flowTable,todoList);
                             break;
 
@@ -739,7 +760,6 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
                             pStat.rAdd++;
                             handleAdd(tokens,flowTable,todoList,swi,swj,swk,fd);
                             break;
-
                     }
 
                 }

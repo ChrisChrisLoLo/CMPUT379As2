@@ -387,7 +387,7 @@ void progController(int nSwitch) {
 
 }
 
-vector<string> queriedPackets;
+vector<string> sentQueryPacks;
 
 //Attempts to find a rule that works for a packet that the switch as recieved. If no rule is found, send a Query packet
 //to the controller.
@@ -413,16 +413,30 @@ void findFlowRule(int initTrafIp, int dstTrafIp, int swi, int swj, int swk, int 
     if (!resolved) {
         string queryPacket =
                 to_string(QUERY) + " " + to_string(swi) + " " + to_string(initTrafIp) + " " + to_string(dstTrafIp);
-        //ask controller for help. query the traffic in a vector
-        printf("Transmitted (src= %i, dest= cont) [QUERY]:  header= (srcIP= %i, destIP= %i)\n",swi,initTrafIp,dstTrafIp);
+        bool dupPacket = false;
+        for(int i;i<sentQueryPacks.size();i++){
+            if(sentQueryPacks[i].compare(queryPacket)==0){
+                dupPacket = true;
+            }
+        }
+        if(dupPacket){
+            return;
+        }
+        else {
+            sentQueryPacks.push_back(queryPacket);
 
-        fdPrint(fd[CONT_FD][1], buf, queryPacket);
-        pStat.tQuery++;
-        traf_t todoTraf;
-        todoTraf.swi = swi;
-        todoTraf.ipSrc = initTrafIp;
-        todoTraf.ipDst = dstTrafIp;
-        todoList.push_back(todoTraf);
+            //ask controller for help. query the traffic in a vector
+            printf("Transmitted (src= %i, dest= cont) [QUERY]:  header= (srcIP= %i, destIP= %i)\n", swi, initTrafIp,
+                   dstTrafIp);
+
+            fdPrint(fd[CONT_FD][1], buf, queryPacket);
+            pStat.tQuery++;
+            traf_t todoTraf;
+            todoTraf.swi = swi;
+            todoTraf.ipSrc = initTrafIp;
+            todoTraf.ipDst = dstTrafIp;
+            todoList.push_back(todoTraf);
+        }
     }
     else {
         switch (foundRule.actionType) {

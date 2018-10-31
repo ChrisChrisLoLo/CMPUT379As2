@@ -31,9 +31,9 @@
 #define RELAY 6
 
 //Define codes for flow table rules
-#define DROP 7
-#define FORWARD 8
-#define SEND 9
+#define DROP 1
+#define FORWARD 2
+#define SEND 3
 
 //Define file descriptor positions for fd[][2] in the switch
 #define CONT_FD 0
@@ -51,6 +51,8 @@
 #define SEND_RIGHT 2
 
 #define KEYBOARDFD_NUM 1
+
+
 
 //Struct to define a given flow rule.
 struct flow_rule{
@@ -98,6 +100,8 @@ struct switch_t{
 
 using namespace std;
 
+const string packetPairs[7] ={"ERROR1","ERROR2","OPEN","ACK","QUERY","ADD","RELAY"};
+const string flowPairs[4]={"ERROR1","DROP","FORWARD","SEND"};
 //Initialize the packet statistics as a global.
 packStat_t pStat;
 
@@ -134,7 +138,6 @@ void fdPrint(int fd,char* buf,string message){
     const char * cString = message.c_str();
     sprintf(buf,cString);
     write(fd,buf, MAX_BUFF);
-    cout<<"Transmitted:("<<message<<")"<<endl;
 }
 
 //Used by the controller to handle a query signal. takes in the packets contents, the fd's the controller has,
@@ -144,6 +147,9 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
     int srcIp = stoi(tokens[2]);
     int dstIp = stoi(tokens[3]);
     char buf[MAX_BUFF];
+
+    //print that we recieved something
+    printf("Received (src= sw%i, dest=cont) [QUERY]:  header= (srcIP= %i, destIP= %i)\n",sourceSw,srcIp,dstIp);
 
     //see if there is a compatible switch that can meet the rules
     bool switchFound=false;
@@ -172,6 +178,8 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
                 //send to all switches in range [sourceSwitch,destinationSwitch);
                 for(int j = sourceSw;j<swArr[i].swi;j++){
                     fdPrint(fd[j-1][1],buf,forwardRightPacket);
+                    printf("Transmitted (src= cont, dest= sw%i)[ADD]",j);
+                    printf("(srcIP= 0-1000, destIP= %i-%i, action= %s:%i, pri=%i, pktCount=0)",dstIp,dstIp,flowPairs[SEND].c_str(),SEND,MIN_PRI);
                     pStat.tAdd++;
                 }
                 switchFound = true;
@@ -205,6 +213,8 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
                 //fully knowing well that we need to repeat this process n-2 times.
                 for(int j = sourceSw; j>swArr[i].swi;j--){
                     fdPrint(fd[j-1][1],buf,forwardLeftPacket);
+                    printf("Transmitted (src= cont, dest= sw%i)[ADD]",j);
+                    printf("(srcIP= 0-1000, destIP= %i-%i, action= %s:%i, pri=%i, pktCount=0)",dstIp,dstIp,flowPairs[SEND].c_str(),SEND,MIN_PRI);
                     pStat.tAdd++;
                 }
                 switchFound = true;
@@ -217,6 +227,8 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
                             +to_string(DROP)+" "+"0"+" "+to_string(MIN_PRI)+" "+"0";
         fdPrint(fd[sourceSw-1][1],buf,dropPacket);
         pStat.tAdd++;
+        printf("Transmitted (src= cont, dest= sw%i)[ADD]\n",sourceSw);
+        printf("(srcIP= 0-1000, destIP= %i-%i, action= %s:%i, pri=%i, pktCount=0)",dstIp,dstIp,flowPairs[DROP].c_str(),DROP,MIN_PRI);
 //        cout<<"PRINTED"<<endl;
     }
 }
@@ -230,6 +242,10 @@ void handleOpen(vector<string> tokens,int fd[][2],vector<switch_t> &swArr){
     switchIn.swk = stoi(tokens[3]);
     switchIn.ipLow = stoi(tokens[4]);
     switchIn.ipHigh = stoi(tokens[5]);
+
+
+    printf("Received (src= sw%i, dest=cont) [OPEN]:  header= (port0= cont ,port1= %i, port2 = %i, port3= %i-%i)\n",
+            switchIn.swi,switchIn.swj,switchIn.swk,switchIn.ipLow,switchIn.ipHigh);
 
     //add switch to the list of switches.
     swArr.push_back({stoi(tokens[1]),stoi(tokens[2]),stoi(tokens[3]),stoi(tokens[4]),stoi(tokens[5])});
@@ -248,8 +264,10 @@ void handleOpen(vector<string> tokens,int fd[][2],vector<switch_t> &swArr){
     //send acknowledgement packet to switch
     string ackPacket = to_string(ACK);
     pStat.tAck++;
+    printf("Transmitted (src= cont, dest= sw%i)[ACK]\n",switchIn.swi);
     char outBuf[MAX_BUFF];
     fdPrint(fd[switchIn.swi-1][1],outBuf,ackPacket);
+
 
 }
 
@@ -320,12 +338,12 @@ void progController(int nSwitch) {
                     cout<<"Switch information:"<<endl;
                     for(int i=0;i<switchArr.size();i++){
                         switch_t sw = switchArr[i];
-                        printf("[%i] port1=%i port2=%i port3=%i-%i\n\n",sw.swi,sw.swj,sw.swk,sw.ipLow,sw.ipHigh);
+                        printf("[%i] port1=%i port2=%i port3=%i-%i\n",sw.swi,sw.swj,sw.swk,sw.ipLow,sw.ipHigh);
                     }
                     //print packet stats
-                    cout<<"Packet Stats:"<<endl;
-                    printf("Recieved:      ADMIT:%i, ACK:%i, ADDRULE:%i, RELAYIN:%i\n",pStat.rAdmit,pStat.rAck,pStat.rAdd,pStat.rRelay);
-                    printf("Transmitted:   OPEN:%i, QUERY:%i, RELAYOUT:%i\n",pStat.tOpen,pStat.tQuery,pStat.tRelay);
+                    cout<<endl<<"Packet Stats:"<<endl;
+                    printf("Recieved:      OPEN:%i, QUERY:%i\n",pStat.rOpen,pStat.rQuery);
+                    printf("Transmitted:   ACK:%i, ADD:%i\n",pStat.tAck,pStat.tAdd);
                 }
                 else if (output == (string)"exit\n"){
                     cout<<"Exiting..."<<endl;
@@ -350,7 +368,6 @@ void progController(int nSwitch) {
                     inLen = read(fd[i][0], buf, MAX_BUFF);
 
                     string output = (string) buf;
-                    cout << "Recieved: " << output << endl;
                     vector<string> tokens = tokenize(output);
                     switch (stoi(tokens[0])) {
                         case OPEN:
@@ -361,7 +378,6 @@ void progController(int nSwitch) {
                         case QUERY:
                             pStat.rQuery++;
                             handleQuery(tokens, fd, switchArr);
-                            cout << "HANDLIN QUERY" << endl;
                             break;
                     }
                 }
@@ -656,8 +672,6 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
         }
         else if (rvalKeyboard == 0 ); //Do Nothing
         else{
-            //BUG: Sometimes keyboard input doesnt work for whatever reason. find out reason why.
-            //check if keyboard has pollin. For some reason poll pri is being introduced
             if(keyboardFd[0].revents & POLLIN){
                 memset(inBuf, 0, MAX_BUFF);
                 inLen = read(0,inBuf,MAX_BUFF);
@@ -668,9 +682,9 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
                     //print the flow table
                     cout<<"Flow table:"<<endl;
                     for(int i=0; i<flowTable.size();i++){
-                        printf("[%i] (srcIp= %i-%i, destIP=%i-%i action=%i, pri= %i, pktCount= %i)\n",i,flowTable[i].srcIpLo,
+                        printf("[%i] (srcIp= %i-%i, destIP= %i-%i action= %s:%i, pri= %i, pktCount= %i)\n",i,flowTable[i].srcIpLo,
                                 flowTable[i].srcIpHi,flowTable[i].destIpLo,flowTable[i].destIpHi,
-                                flowTable[i].actionType,flowTable[i].pri,flowTable[i].pktCount);
+                                flowPairs[flowTable[i].actionType].c_str(),flowTable[i].actionType,flowTable[i].pri,flowTable[i].pktCount);
                     }
                     //print the packet stats
                     cout<<"Packet Stats:"<<endl;
@@ -684,7 +698,6 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
                 else{
                     cout<<"Unknown input command."<<endl;
                 }
-                cout<<output<<endl;
             }
         }
 

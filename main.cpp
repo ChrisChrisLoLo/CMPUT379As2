@@ -178,8 +178,8 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
                 //send to all switches in range [sourceSwitch,destinationSwitch);
                 for(int j = sourceSw;j<swArr[i].swi;j++){
                     fdPrint(fd[j-1][1],buf,forwardRightPacket);
-                    printf("Transmitted (src= cont, dest= sw%i)[ADD]",j);
-                    printf("(srcIP= 0-1000, destIP= %i-%i, action= %s:%i, pri=%i, pktCount=0)",dstIp,dstIp,flowPairs[SEND].c_str(),SEND,MIN_PRI);
+                    printf("Transmitted (src= cont, dest= sw%i)[ADD]\n",j);
+                    printf("(srcIP= 0-1000, destIP= %i-%i, action= %s:%i, pri=%i, pktCount=0)\n",dstIp,dstIp,flowPairs[SEND].c_str(),SEND,MIN_PRI);
                     pStat.tAdd++;
                 }
                 switchFound = true;
@@ -213,8 +213,8 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
                 //fully knowing well that we need to repeat this process n-2 times.
                 for(int j = sourceSw; j>swArr[i].swi;j--){
                     fdPrint(fd[j-1][1],buf,forwardLeftPacket);
-                    printf("Transmitted (src= cont, dest= sw%i)[ADD]",j);
-                    printf("(srcIP= 0-1000, destIP= %i-%i, action= %s:%i, pri=%i, pktCount=0)",dstIp,dstIp,flowPairs[SEND].c_str(),SEND,MIN_PRI);
+                    printf("Transmitted (src= cont, dest= sw%i)[ADD]\n",j);
+                    printf("(srcIP= 0-1000, destIP= %i-%i, action= %s:%i, pri=%i, pktCount=0)\n",dstIp,dstIp,flowPairs[SEND].c_str(),SEND,MIN_PRI);
                     pStat.tAdd++;
                 }
                 switchFound = true;
@@ -228,7 +228,7 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
         fdPrint(fd[sourceSw-1][1],buf,dropPacket);
         pStat.tAdd++;
         printf("Transmitted (src= cont, dest= sw%i)[ADD]\n",sourceSw);
-        printf("(srcIP= 0-1000, destIP= %i-%i, action= %s:%i, pri=%i, pktCount=0)",dstIp,dstIp,flowPairs[DROP].c_str(),DROP,MIN_PRI);
+        printf("(srcIP= 0-1000, destIP= %i-%i, action= %s:%i, pri=%i, pktCount=0)\n",dstIp,dstIp,flowPairs[DROP].c_str(),DROP,MIN_PRI);
 //        cout<<"PRINTED"<<endl;
     }
 }
@@ -713,6 +713,8 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
         else{
             for(int i=0;i<3;i++){
                 if(pollfd[i].revents & POLLIN){
+                    //determine what switch (if any) the fd belongs to.
+                    int sendingSwitch = (i==SWK_FD)?swk:swj;
                     memset(inBuf, 0, MAX_BUFF);
                     inLen = read(fd[i][0],inBuf,MAX_BUFF);
 
@@ -722,11 +724,13 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
                         case ACK:
                             //cout<<"Got ACK"<<endl;
                             pStat.rAck++;
+                            printf("Received (src= cont, dest= sw%i) [ACK]\n",swi);
                             break;
 
                         case RELAY:
                             //cout<<"Got RELAY"<<endl;
                             pStat.rRelay++;
+                            printf("Received (src= sw%i, dest= sw%i) [RELAY]:  header= (srcIP= %i, destIP= %i)",sendingSwitch,swi,stoi(tokens[1]),stoi(tokens[2]));
                             findFlowRule(stoi(tokens[1]),stoi(tokens[2]),swi,swj,swk,fd,flowTable,todoList);
                             break;
 

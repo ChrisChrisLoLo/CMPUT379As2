@@ -23,27 +23,34 @@
 #define MIN_IP 0
 #define MAX_IP 1000
 
+//Define codes for packet actions
 #define OPEN 2
 #define ACK 3
 #define QUERY 4
 #define ADD 5
 #define RELAY 6
 
+//Define codes for flow table rules
 #define DROP 7
 #define FORWARD 8
 #define SEND 9
 
+//Define file descriptor positions for fd[][2] in the switch
 #define CONT_FD 0
 #define SWJ_FD 1
 #define SWK_FD 2
 
+//Define minimum priority
 #define MIN_PRI 4
 
+//Define maximum message buffer size
 #define MAX_BUFF 80
 
 //Note that SWJ_FD = SEND_LEFT and SWK_FD = SEND RIGHT. THIS IS NEEDED.
 #define SEND_LEFT 1
 #define SEND_RIGHT 2
+
+#define KEYBOARDFD_NUM 1
 
 //Struct to define a given flow rule.
 struct flow_rule{
@@ -127,6 +134,7 @@ void fdPrint(int fd,char* buf,string message){
     const char * cString = message.c_str();
     sprintf(buf,cString);
     write(fd,buf, MAX_BUFF);
+    cout<<"Transmitted:("<<message<<")"<<endl;
 }
 
 //Used by the controller to handle a query signal. takes in the packets contents, the fd's the controller has,
@@ -283,15 +291,15 @@ void progController(int nSwitch) {
 
     //Initialize a file descriptor for standard input
     struct pollfd keyboardFd[1];
-    keyboardFd[0].fd = STDOUT_FILENO;
-    keyboardFd[1].events=POLLIN;
-    keyboardFd[2].revents=0;
+    keyboardFd[0].fd = STDIN_FILENO;
+    keyboardFd[0].events=POLLIN;
+    keyboardFd[0].revents=0;
     char outBuf[MAX_BUFF];
     char inBuf[MAX_BUFF];
     while (1) {
 
         //poll the  keyboard
-        int rvalKeyboard=poll(keyboardFd,3,timeout);
+        int rvalKeyboard=poll(keyboardFd,KEYBOARDFD_NUM,timeout);
         if (rvalKeyboard < 0){
             perror("Error in polling in controller");
             exit(EXIT_FAILURE);
@@ -305,6 +313,7 @@ void progController(int nSwitch) {
                 inLen = read(0,inBuf,MAX_BUFF);
 
                 string output = (string) inBuf;
+                //cout<<output<<endl;
 
                 if (output == (string)"list\n"){
                     //print switch information
@@ -325,7 +334,6 @@ void progController(int nSwitch) {
                 else{
                     cout<<"Unknown input command."<<endl;
                 }
-                cout<<output<<endl;
             }
         }
         //poll the switches
@@ -333,7 +341,8 @@ void progController(int nSwitch) {
         if (rval < 0) {
             perror("Error in polling in controller");
             exit(EXIT_FAILURE);
-        } else if (rval == 0); //Do Nothing
+        }
+        else if (rval == 0); //Do Nothing
         else {
             for (int i = 0; i < nSwitch; i++) {
                 if (pollfd[i].revents & POLLIN) {
@@ -341,7 +350,7 @@ void progController(int nSwitch) {
                     inLen = read(fd[i][0], buf, MAX_BUFF);
 
                     string output = (string) buf;
-                    cout << output << endl;
+                    cout << "Recieved: " << output << endl;
                     vector<string> tokens = tokenize(output);
                     switch (stoi(tokens[0])) {
                         case OPEN:
@@ -553,7 +562,7 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
     if(swj != -1){
         string fifoSwjWrite = "./fifo-"+to_string(swi)+"-"+to_string(swj);
         string fifoSwjRead = "./fifo-"+to_string(swj)+"-"+to_string(swi);
-        if (fifoSwjRead.c_str(),(mode_t) 0777);
+        mkfifo(fifoSwjRead.c_str(),(mode_t) 0777);
         int fileSwjRead = open(fifoSwjRead.c_str(),O_RDONLY|O_NONBLOCK);
         if (fileSwjRead<0){
             perror("Error in opening swj readFIFO");
@@ -603,8 +612,8 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
     //Initialize a file descriptor for standard input
     struct pollfd keyboardFd[1];
     keyboardFd[0].fd = STDOUT_FILENO;
-    keyboardFd[1].events=POLLIN;
-    keyboardFd[2].revents=0;
+    keyboardFd[0].events=POLLIN;
+    keyboardFd[0].revents=0;
 
     char outBuf[MAX_BUFF];
     char inBuf[MAX_BUFF];
@@ -640,7 +649,7 @@ void progSwitch(int swi, int swj,int swk,int ipLow,int ipHigh){
         }
         //poll keyboard
 
-        int rvalKeyboard=poll(keyboardFd,3,timeout);
+        int rvalKeyboard=poll(keyboardFd,KEYBOARDFD_NUM,timeout);
         if (rvalKeyboard < 0){
             perror("Error in polling in controller");
             exit(EXIT_FAILURE);
@@ -736,7 +745,7 @@ int main(int argc, char* argv[]){
         cout<<"Error:Rlimit set failed"<<endl;
         cout<<strerror(errno)<<endl;
     }
-    if (argc < 1){
+    if (argc <= 1){
         pExit("Error: No parameters specified");
     }
     else if (argc > 6){

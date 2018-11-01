@@ -157,7 +157,7 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
         if(dstIp>=swArr[i].ipLow && dstIp<=swArr[i].ipHigh){
             if (sourceSw < swArr[i].swi) {
                 //Tell to send packet right
-                string forwardRightPacket = (string) to_string(ADD)+" "+"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
+                string forwardRightPacket = (string) to_string(ADD)+" "+"0 1000"+" "+to_string(swArr[i].ipLow)+" "+to_string(swArr[i].ipHigh)+" "
                                             +to_string(SEND)+" "+to_string(SEND_RIGHT)+" "+to_string(MIN_PRI)+" "+"0";
                 bool canTravel = true;
                 //double check that there are intermediary switches that can carry the package
@@ -191,7 +191,7 @@ void handleQuery(vector<string> tokens, int fd[][2],vector<switch_t> swArr){
             }
             else if (sourceSw > swArr[i].swi){
                 //Give command to send packet left
-                string forwardLeftPacket = (string) to_string(ADD)+" "+"0 1000"+" "+to_string(dstIp)+" "+to_string(dstIp)+" "
+                string forwardLeftPacket = (string) to_string(ADD)+" "+"0 1000"+" "+to_string(swArr[i].ipLow)+" "+to_string(swArr[i].ipHigh)+" "
                                            +to_string(SEND)+" "+to_string(SEND_LEFT)+" "+to_string(MIN_PRI)+" "+"0";
                 bool canTravel = true;
                 //double check that there are intermediary switches that can carry the package
@@ -286,8 +286,8 @@ void progController(int nSwitch) {
     int fd[nSwitch][2];
     struct pollfd pollfd[nSwitch];
     int done[nSwitch];
-    //Open pipes from switches 1-n
 
+    //Open pipes from switches 1-n
     for (int i = 1; i < nSwitch + 1; i++) {
         string fifoDirWrite = "./fifo-0-" + to_string(i);
         string fifoDirRead = "./fifo-" + to_string(i) + "-0";
